@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>ESP32 Relay Control Dashboard</title>
+  <title>Thief Sensor Control Dashboard</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body {
@@ -195,7 +195,7 @@
       </div>
 
       <footer  class="text-center">
-        Created by AbbayCorp
+        Customize by AbbayCorp
       </footer>
 
   </div>
@@ -219,30 +219,7 @@
       appId: "1:225335243592:web:4a88f2a9b58cf8fff2f97d"
     };
 
-    firebase.initializeApp(firebaseConfig);
-
-    // Predefined login credentials (can be replaced with your logic)
-    const allowedEmail = "abbay89@gmail.com";
-    const allowedPassword = "Pangeran89";
-
-
-    firebase.auth().setPersistence(firebase.auth.Auth.Persistence.SESSION)
-    .then(() => {
-      // Existing and future Auth states are now persisted in the current
-      // session only. Closing the window would clear any existing state even
-      // if a user forgets to sign out.
-      // ...
-      // New sign-in will be persisted with session persistence.
-      return firebase.auth().signInWithEmailAndPassword(allowedEmail, allowedEmail);
-    })
-    .catch((error) => {
-      // Handle Errors here.
-      var errorCode = error.code;
-      var errorMessage = error.message;
-    });
-      
-
-    
+    firebase.initializeApp(firebaseConfig);    
 
     const loginForm = document.getElementById("loginForm");
     const dashboard = document.getElementById("dashboard");
@@ -258,7 +235,7 @@
       }
 
       // Check hardcoded credentials first
-      if(email === allowedEmail && password === allowedPassword){
+      // if(email === allowedEmail && password === allowedPassword){
         // Sign in with Firebase
         firebase.auth().signInWithEmailAndPassword(email, password)
           .then(userCredential => {
@@ -270,9 +247,9 @@
           .catch(error => {
             alert("Firebase login failed: " + error.message);
           });
-      } else {
-        alert("Invalid email or password.");
-      }
+      // } else {
+      //   alert("Invalid email or password.");
+      // }
     });
 
     function startRelayControl() {
