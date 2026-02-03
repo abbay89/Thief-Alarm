@@ -178,13 +178,13 @@
           <div class="relay-card">
             <h2>Start</h2>
             <p>Time: <span id="status13">Loading...</span></p>
-            <input class="form-control" id="btn13" value="">
+            <input type="time" class="form-control" id="btn13" value="">
           </div>
 
           <div class="relay-card">
             <h2>End</h2>
             <p>Time: <span id="status14">Loading...</span></p>
-            <input class="form-control" id="btn14" value="">
+            <input type="time" class="form-control" id="btn14" value="">
           </div>
 
          
@@ -286,9 +286,9 @@
             });
           };
         } else if (toggleButton.tagName === 'INPUT') {
-          toggleButton.addEventListener('keydown', function(event) {
+          toggleButton.addEventListener('input', function(event) {
               // Check if the pressed key is 'Enter'
-              if (event.key === 'Enter') {
+              // if (event.key === 'Enter') {
                   // Prevent the default action (e.g., a new line in a textarea)
                   event.preventDefault(); 
                   
@@ -296,7 +296,7 @@
                   
                   relayRef.set(event.target.value);                  
                   // handleEnterKey(event.target.value);
-              }
+              // }
           });
         }
         
