@@ -168,6 +168,12 @@
 
       <!-- Dashboard -->
       <div id="dashboard">
+        <div class="row">
+          <div class="col-12 text-center">
+            <h3>Latest Human Presence</h3>
+            <h5 id="status15">2026-01-03 00:00:00</h5>
+          </div>
+        </div>
         <div class="relay-container">
           <div class="relay-card">
             <h2>Sensor Notification</h2>
@@ -259,6 +265,7 @@
         { id: 12, path: "board1/outputs/digital/12" },
         { id: 13, path: "board1/outputs/digital/13" },
         { id: 14, path: "board1/outputs/digital/14" },
+        { id: 15, path: "board1/outputs/digital/15" },
         
       ];
 
@@ -268,36 +275,53 @@
         const relayRef = db.ref("/" + relay.path);
 
         relayRef.on("value", (snapshot) => {
+
             const state = snapshot.val();
-            if (toggleButton.tagName === 'BUTTON') {
-              statusText.innerText = state ? "ON" : "OFF";
-              toggleButton.style.backgroundColor = state ? "green" : "red";
-            } else if (toggleButton.tagName === 'INPUT') {
-              statusText.innerText = state;
+
+            console.log(relay.id)
+            console.log(state)
+
+            if(toggleButton){
+              if (toggleButton.tagName === 'BUTTON') {
+                statusText.innerText = state ? "ON" : "OFF";
+                toggleButton.style.backgroundColor = state ? "green" : "red";
+              } else if (toggleButton.tagName === 'INPUT') {
+                statusText.innerText = state;
+              }
+            }
+
+            if(relay.id == 15){
+              const originalString = state;
+              const firstChar = originalString.charAt(0);
+              const remainingString = originalString.slice(1);
+              const newString = "20" + remainingString;
+              statusText.innerText = newString;
             }
         });
 
-        // console.log(toggleButton.tagName);
-        if (toggleButton.tagName === 'BUTTON') {
-          console.log('This is a div element.');
-          toggleButton.onclick = () => {
-            relayRef.get().then(snap => {
-              relayRef.set(!snap.val() ? 1 : 0 );
-            });
-          };
-        } else if (toggleButton.tagName === 'INPUT') {
-          toggleButton.addEventListener('input', function(event) {
-              // Check if the pressed key is 'Enter'
-              // if (event.key === 'Enter') {
-                  // Prevent the default action (e.g., a new line in a textarea)
-                  event.preventDefault(); 
-                  
-                  // Execute your desired function
-                  
-                  relayRef.set(event.target.value);                  
-                  // handleEnterKey(event.target.value);
-              // }
-          });
+        if(toggleButton){
+            // console.log(toggleButton.tagName);
+            if (toggleButton.tagName === 'BUTTON') {
+              console.log('This is a div element.');
+              toggleButton.onclick = () => {
+                relayRef.get().then(snap => {
+                  relayRef.set(!snap.val() ? 1 : 0 );
+                });
+              };
+            } else if (toggleButton.tagName === 'INPUT') {
+              toggleButton.addEventListener('input', function(event) {
+                  // Check if the pressed key is 'Enter'
+                  // if (event.key === 'Enter') {
+                      // Prevent the default action (e.g., a new line in a textarea)
+                      event.preventDefault(); 
+                      
+                      // Execute your desired function
+                      
+                      relayRef.set(event.target.value);                  
+                      // handleEnterKey(event.target.value);
+                  // }
+              });
+            }
         }
         
       });
