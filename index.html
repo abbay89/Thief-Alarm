@@ -193,7 +193,11 @@
             <input type="time" class="form-control" id="btn14" value="">
           </div>
 
-         
+          <div class="relay-card">
+            <h2>Notif Interval</h2>
+            <p>Minutes: <span id="status17">Loading...</span></p>
+            <input type="number" class="form-control" id="btn17" min="0" value="">
+          </div>
         </div>
 
         <!-- <button id="allOffBtn">All OFF</button> -->
@@ -266,7 +270,7 @@
         { id: 13, path: "board1/outputs/digital/13" },
         { id: 14, path: "board1/outputs/digital/14" },
         { id: 15, path: "board1/outputs/digital/15" },
-        
+        { id: 17, path: "board1/outputs/digital/17" },
       ];
 
       relays.forEach(relay => {
@@ -309,18 +313,16 @@
                 });
               };
             } else if (toggleButton.tagName === 'INPUT') {
-              toggleButton.addEventListener('input', function(event) {
-                  // Check if the pressed key is 'Enter'
-                  // if (event.key === 'Enter') {
-                      // Prevent the default action (e.g., a new line in a textarea)
-                      event.preventDefault(); 
-                      
-                      // Execute your desired function
-                      
-                      relayRef.set(event.target.value);                  
-                      // handleEnterKey(event.target.value);
-                  // }
-              });
+              if (toggleButton.type === 'number') {
+                toggleButton.addEventListener('change', function(event) {
+                  relayRef.set(parseInt(event.target.value) || 0);
+                });
+              } else {
+                toggleButton.addEventListener('input', function(event) {
+                    event.preventDefault();
+                    relayRef.set(event.target.value);
+                });
+              }
             }
         }
         
