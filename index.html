@@ -198,6 +198,15 @@
             <p>Minutes: <span id="status17">Loading...</span></p>
             <input type="number" class="form-control" id="btn17" min="0" value="">
           </div>
+
+          <div class="relay-card">
+            <h2>Notif Method</h2>
+            <p>Mode: <span id="status16">Loading...</span></p>
+            <select class="form-control" id="btn16">
+              <option value="0">WhatsApp</option>
+              <option value="1">Telegram</option>
+            </select>
+          </div>
         </div>
 
         <!-- <button id="allOffBtn">All OFF</button> -->
@@ -270,6 +279,7 @@
         { id: 13, path: "board1/outputs/digital/13" },
         { id: 14, path: "board1/outputs/digital/14" },
         { id: 15, path: "board1/outputs/digital/15" },
+        { id: 16, path: "board1/outputs/digital/16" },
         { id: 17, path: "board1/outputs/digital/17" },
       ];
 
@@ -291,6 +301,9 @@
                 toggleButton.style.backgroundColor = state ? "green" : "red";
               } else if (toggleButton.tagName === 'INPUT') {
                 statusText.innerText = state;
+              } else if (toggleButton.tagName === 'SELECT') {
+                statusText.innerText = state == 1 ? "Telegram" : "WhatsApp";
+                toggleButton.value = state;
               }
             }
 
@@ -323,6 +336,10 @@
                     relayRef.set(event.target.value);
                 });
               }
+            } else if (toggleButton.tagName === 'SELECT') {
+              toggleButton.addEventListener('change', function(event) {
+                relayRef.set(parseInt(event.target.value) || 0);
+              });
             }
         }
         
