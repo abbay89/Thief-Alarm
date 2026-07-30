@@ -396,7 +396,9 @@
   const db = firebase.database();
   const wifiConfigRef = db.ref("board1/wifi_config");
   
-  function scanWiFi() {
+let lastScanTime = 0;
+
+function scanWiFi() {
     const btn = document.getElementById("scanWifiBtn");
     const list = document.getElementById("wifiList");
     const select = document.getElementById("wifiSelect");
@@ -406,29 +408,37 @@
     select.innerHTML = '<option value="">Scanning...</option>';
     list.style.display = "block";
     
-    // Use Firebase function to trigger ESP32 scan
     db.ref("board1/wifi_config/scan_request").set(true)
       .then(() => {
-        // Poll for results
         let attempts = 0;
         const poll = setInterval(() => {
-          db.ref("board1/wifi_config/scan_results").once("value").then(snapshot => {
-            const networks = snapshot.val();
-            if (networks && networks.length > 0) {
+          db.ref("board1/wifi_config/scan_time").once("value").then(timeSnap => {
+            const scanTime = timeSnap.val();
+            if (scanTime && scanTime !== lastScanTime) {
+              lastScanTime = scanTime;
               clearInterval(poll);
               select.innerHTML = '<option value="">Select Network</option>';
-              networks.forEach(net => {
-                const opt = document.createElement("option");
-                opt.value = net.ssid;
-                opt.textContent = `${net.ssid} (${net.rssi} dBm) ${net.encrypted ? "🔒" : "🔓"}`;
-                select.appendChild(opt);
+              db.ref("board1/wifi_config/scan_count").once("value").then(countSnap => {
+                const count = countSnap.val() || 0;
+                for (let i = 0; i < count && i < 5; i++) {
+                  const netRef = db.ref("board1/wifi_config/networks/" + i);
+                  netRef.once("value").then(netSnap => {
+                    const net = netSnap.val();
+                    if (net && net.ssid) {
+                      const opt = document.createElement("option");
+                      opt.value = net.ssid;
+                      opt.textContent = `${net.ssid} (${net.rssi} dBm)`;
+                      select.appendChild(opt);
+                    }
+                  });
+                }
               });
               btn.disabled = false;
               btn.innerText = "Scan Networks";
             }
           });
           attempts++;
-          if (attempts > 20) {
+          if (attempts > 30) {
             clearInterval(poll);
             select.innerHTML = '<option value="">Timeout - try again</option>';
             btn.disabled = false;
@@ -447,13 +457,13 @@
     const ssid = document.getElementById("wifiSelect").value;
     const pass = document.getElementById("wifiPassword").value;
     const save = document.getElementById("saveToFirebase").checked;
+    const btn = event.target;
     
     if (!ssid) {
       alert("Please select a network");
       return;
     }
     
-    const btn = event.target;
     btn.disabled = true;
     btn.innerText = "Connecting...";
     
@@ -463,21 +473,23 @@
       connect_pass: pass,
       connect_save: save
     }).then(() => {
-      // Poll for result
       let attempts = 0;
       const poll = setInterval(() => {
-        db.ref("board1/wifi_config/connect_result").once("value").then(snapshot => {
-          const result = snapshot.val();
-          if (result) {
+        db.ref("board1/wifi_config/connect_result/success").once("value").then(snapshot => {
+          const val = snapshot.val();
+          if (val === true) {
             clearInterval(poll);
-            if (result.success) {
-              alert("Connected! " + (save ? "Saved to Firebase." : "Not saved."));
-              updateWifiStatus();
-            } else {
-              alert("Failed: " + (result.error || "Unknown error"));
-            }
+            alert("Connected! " + (save ? "Saved to Firebase." : "Not saved."));
+            updateWifiStatus();
             btn.disabled = false;
             btn.innerText = "Connect & Save";
+          } else if (val === false) {
+            clearInterval(poll);
+            db.ref("board1/wifi_config/connect_result/error").once("value").then(errSnap => {
+              alert("Failed: " + (errSnap.val() || "Unknown error"));
+              btn.disabled = false;
+              btn.innerText = "Connect & Save";
+            });
           }
         });
         attempts++;
