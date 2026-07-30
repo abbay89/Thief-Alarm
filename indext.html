@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Thief Sensor Control Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background-color: #f9f9f9;
+      margin: 0;
+      padding: 0 10px 40px;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      justify-content: space-between;
+    }
+    h1 {
+      margin-top: 30px;
+      font-size: 1.8rem;
+    }
+    .relay-card {
+      display: inline-block;
+      background-color: white;
+      padding: 20px;
+      margin: 15px;
+      border-radius: 15px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      width: 220px;
+      vertical-align: top;
+    }
+    .relay-card h2 {
+      margin-bottom: 10px;
+      font-size: 1.3rem;
+    }
+    .relay-card p {
+      margin-bottom: 10px;
+      font-size: 1rem;
+    }
+    .relay-card button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 10px;
+      color: white;
+      background-color: blue;
+      cursor: pointer;
+      font-size: 16px;
+	  width: 90%;
+      transition: opacity 0.3s ease;
+    }
+    .relay-card button:hover {
+      opacity: 0.8;
+    }
+    #allOffBtn, #logoutBtn {
+      max-width: 300px;
+      width: 90%;
+      padding: 12px 25px;
+      font-size: 16px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      margin: 15px auto;
+      display: block;
+      color: white;
+      transition: opacity 0.3s ease;
+    }
+    #allOffBtn {
+      background-color: #d32f2f;
+    }
+    #allOffBtn:hover {
+      opacity: 0.8;
+    }
+    #logoutBtn {
+      background-color: #555;
+    }
+    #logoutBtn:hover {
+      opacity: 0.8;
+    }
+
+    /* Responsive layout */
+    #dashboard {
+      display: none;
+    }
+    #loginForm {
+      max-width: 400px;
+      margin: 20px auto 20px;
+      background: white;
+      padding: 30px 20px;
+      border-radius: 15px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    #loginForm input {
+      width: 100%;
+      padding: 12px 15px;
+      margin: 10px 0 20px;
+      font-size: 1rem;
+      border: 1.5px solid #ccc;
+      border-radius: 10px;
+      box-sizing: border-box;
+      outline-offset: 2px;
+      transition: border-color 0.3s ease;
+    }
+    #loginForm input:focus {
+      border-color: #1e88e5;
+    }
+    #loginForm button {
+      width: 100%;
+      background-color: #1e88e5;
+      color: white;
+      padding: 12px;
+      font-size: 18px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+    #loginForm button:hover {
+      background-color: #1565c0;
+    }
+    #dashboard .relay-container {
+      max-width: 960px;
+      margin: 20px auto 0;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    /* Smaller devices */
+    @media (max-width: 700px) {
+      .relay-card {
+        width: 90%;
+        margin: 10px auto;
+        display: block;
+      }
+      body {
+        padding: 0 10px 60px;
+      }
+    }
+    footer {
+      font-size: 0.9rem;
+      color: #666;
+      padding: 10px 0;
+      margin-top: 40px;
+    }
+    .full-height-container {
+      min-height: 100vh;
+    }
+    html, body {
+      height: 100%;
+    }
+  </style>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+
+</head>
+<body>
+<div class="container d-flex full-height-container align-items-center justify-content-center">
+<div class="row">
+    <div class="col-12">
+      <h1 class="text-center">Thief Sensor Control Dashboard</h1>
+
+      <!-- Login form -->
+      <div id="loginForm">
+        <input type="email" id="email" placeholder="Enter Email" required />
+        <input type="password" id="password" placeholder="Enter Password" required />
+        <button id="loginBtn">Login</button>
+      </div>
+
+      <!-- Dashboard -->
+      <div id="dashboard">
+        <div class="row">
+          <div class="col-12 text-center">
+            <h3>Latest Human Presence</h3>
+            <h5 id="status15">2026-01-03 00:00:00</h5>
+          </div>
+        </div>
+        <div class="relay-container">
+          <div class="relay-card">
+            <h2>Sensor Notification</h2>
+            <p>Status: <span id="status12">Loading...</span></p>
+            <button id="btn12">Toggle</button>
+          </div>
+
+          <div class="relay-card">
+            <h2>Start</h2>
+            <p>Time: <span id="status13">Loading...</span></p>
+            <input type="time" class="form-control" id="btn13" value="">
+          </div>
+
+          <div class="relay-card">
+            <h2>End</h2>
+            <p>Time: <span id="status14">Loading...</span></p>
+            <input type="time" class="form-control" id="btn14" value="">
+          </div>
+
+          <div class="relay-card">
+            <h2>Notif Interval</h2>
+            <p>Minutes: <span id="status17">Loading...</span></p>
+            <input type="number" class="form-control" id="btn17" min="0" value="">
+          </div>
+
+          <div class="relay-card">
+            <h2>Notif Method</h2>
+            <p>Mode: <span id="status16">Loading...</span></p>
+            <select class="form-control" id="btn16">
+              <option value="0">WhatsApp</option>
+              <option value="1">Telegram</option>
+            </select>
+          </div>
+
+          <div class="relay-card">
+            <h2>WiFi Config</h2>
+            <div class="mb-2">
+              <small>Status: <span id="wifiStatus">Loading...</span></small><br>
+              <small>Online: <span id="lastOnline">-</span></small>
+            </div>
+            <button class="btn btn-primary" id="scanWifiBtn" onclick="scanWiFi()">Scan Networks</button>
+            <div id="wifiList" class="mt-2" style="display: none;">
+              <select class="form-control" id="wifiSelect"></select>
+              <input type="password" class="form-control mt-2" id="wifiPassword" placeholder="Password">
+              <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" id="saveToFirebase" checked>
+                <label class="form-check-label" for="saveToFirebase">Save to Firebase</label>
+              </div>
+              <button class="btn btn-success mt-2" onclick="connectWiFi()">Connect & Save</button>
+            </div>
+            <div class="form-check mt-2">
+              <input class="form-check-input" type="checkbox" id="useCustomWifi" onchange="toggleCustomWifi(this.checked)">
+              <label class="form-check-label" for="useCustomWifi">Use Custom WiFi (from Firebase)</label>
+            </div>
+            <div id="customWifiFields" style="display: none; margin-top: 10px;">
+              <input type="text" class="form-control" id="customSsid" placeholder="Custom SSID">
+              <input type="password" class="form-control mt-2" id="customPass" placeholder="Custom Password">
+              <button class="btn btn-warning mt-2" onclick="saveCustomWifi()">Save to Firebase</button>
+            </div>
+            <div class="mt-2">
+              <small class="text-muted">Default: iconnet / BlackPanther (no Firebase needed)</small>
+            </div>
+          </div>
+        </div>
+
+        <!-- <button id="allOffBtn">All OFF</button> -->
+        <button id="logoutBtn">Logout</button>
+      </div>
+
+      <footer  class="text-center">
+        Customize by AbbayCorp
+      </footer>
+
+  </div>
+</div>
+
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+
+  <script>
+    // Firebase config
+    const firebaseConfig = {
+      apiKey: "AIzaSyCwgPIXYmb1X265MAMnblvhuLH-F397HuY",
+      authDomain: "thiefdetectorapp.firebaseapp.com",
+      databaseURL: "https://thiefdetectorapp-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "thiefdetectorapp",
+      storageBucket: "thiefdetectorapp.firebasestorage.app",
+      messagingSenderId: "225335243592",
+      appId: "1:225335243592:web:4a88f2a9b58cf8fff2f97d"
+    };
+
+    firebase.initializeApp(firebaseConfig);    
+
+    const loginForm = document.getElementById("loginForm");
+    const dashboard = document.getElementById("dashboard");
+    const loginBtn = document.getElementById("loginBtn");
+
+    loginBtn.addEventListener("click", () => {
+      const email = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value;
+
+      if (!email || !password) {
+        alert("Please enter email and password.");
+        return;
+      }
+
+      // Check hardcoded credentials first
+      // if(email === allowedEmail && password === allowedPassword){
+        // Sign in with Firebase
+        firebase.auth().signInWithEmailAndPassword(email, password)
+          .then(userCredential => {
+            console.log("Signed in as", userCredential.user.email);
+            loginForm.style.display = "none";
+            dashboard.style.display = "block";
+            startRelayControl();
+          })
+          .catch(error => {
+            alert("Firebase login failed: " + error.message);
+          });
+      // } else {
+      //   alert("Invalid email or password.");
+      // }
+    });
+
+    function startRelayControl() {
+      const db = firebase.database();
+
+      const relays = [
+        { id: 12, path: "board1/outputs/digital/12" },
+        { id: 13, path: "board1/outputs/digital/13" },
+        { id: 14, path: "board1/outputs/digital/14" },
+        { id: 15, path: "board1/outputs/digital/15" },
+        { id: 16, path: "board1/outputs/digital/16" },
+        { id: 17, path: "board1/outputs/digital/17" },
+      ];
+
+      relays.forEach(relay => {
+        const statusText = document.getElementById(`status${relay.id}`);
+        const toggleButton = document.getElementById(`btn${relay.id}`);
+        const relayRef = db.ref("/" + relay.path);
+
+        relayRef.on("value", (snapshot) => {
+
+            const state = snapshot.val();
+
+            console.log(relay.id)
+            console.log(state)
+
+            if(toggleButton){
+              if (toggleButton.tagName === 'BUTTON') {
+                statusText.innerText = state ? "ON" : "OFF";
+                toggleButton.style.backgroundColor = state ? "green" : "red";
+              } else if (toggleButton.tagName === 'INPUT') {
+                statusText.innerText = state;
+              } else if (toggleButton.tagName === 'SELECT') {
+                statusText.innerText = state == 1 ? "Telegram" : "WhatsApp";
+                toggleButton.value = state;
+              }
+            }
+
+            if(relay.id == 15){
+              const originalString = state;
+              const firstChar = originalString.charAt(0);
+              const remainingString = originalString.slice(1);
+              const newString = "20" + remainingString;
+              statusText.innerText = newString;
+            }
+        });
+
+        if(toggleButton){
+            // console.log(toggleButton.tagName);
+            if (toggleButton.tagName === 'BUTTON') {
+              console.log('This is a div element.');
+              toggleButton.onclick = () => {
+                relayRef.get().then(snap => {
+                  relayRef.set(!snap.val() ? 1 : 0 );
+                });
+              };
+            } else if (toggleButton.tagName === 'INPUT') {
+              if (toggleButton.type === 'number') {
+                toggleButton.addEventListener('change', function(event) {
+                  relayRef.set(parseInt(event.target.value) || 0);
+                });
+              } else {
+                toggleButton.addEventListener('input', function(event) {
+                    event.preventDefault();
+                    relayRef.set(event.target.value);
+                });
+              }
+            } else if (toggleButton.tagName === 'SELECT') {
+              toggleButton.addEventListener('change', function(event) {
+                relayRef.set(parseInt(event.target.value) || 0);
+              });
+            }
+        }
+        
+      });
+
+      // document.getElementById("allOffBtn").onclick = () => {
+      //   relays.forEach(relay => {
+      //     db.ref("/" + relay.path).set(false);
+      //   });
+      // };
+
+      // Real-time wifi connection status
+      const wifiStatusEl = document.getElementById("wifiStatus");
+      const lastOnlineEl = document.getElementById("lastOnline");
+      db.ref("board1/wifi_config").on("value", (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+          if (data.connected) {
+            let ssid = data.last_connected || "Unknown";
+            wifiStatusEl.innerText = `${ssid} ✅`;
+            wifiStatusEl.style.color = "green";
+          } else {
+            let ssid = data.last_connected || "";
+            wifiStatusEl.innerText = ssid ? `${ssid} ❌` : "Disconnected ❌";
+            wifiStatusEl.style.color = "red";
+          }
+          if (data.last_online) {
+            const t = data.last_online;
+            const yr = t.substring(0,4);
+            const mo = t.substring(5,7);
+            const dy = t.substring(8,10);
+            const hh = t.substring(11,13);
+            const mn = t.substring(14,16);
+            const ss = t.substring(17,19);
+            const d = new Date(yr, mo-1, dy, hh, mn, ss);
+            lastOnlineEl.innerText = d.toLocaleString();
+          } else {
+            lastOnlineEl.innerText = "-";
+          }
+        }
+      });
+    }
+
+    document.getElementById("logoutBtn").onclick = () => {
+      firebase.auth().signOut()
+        .then(() => {
+          dashboard.style.display = "none";
+          loginForm.style.display = "block";
+          document.getElementById("email").value = "";
+          document.getElementById("password").value = "";
+        })
+        .catch(error => {
+          alert("Logout failed: " + error.message);
+        });
+    };
+  
+  // WiFi Configuration Functions
+  const db = firebase.database();
+  const wifiConfigRef = db.ref("board1/wifi_config");
+  
+let lastScanTime = 0;
+
+function scanWiFi() {
+    const btn = document.getElementById("scanWifiBtn");
+    const list = document.getElementById("wifiList");
+    const select = document.getElementById("wifiSelect");
+    
+    btn.disabled = true;
+    btn.innerText = "Scanning...";
+    select.innerHTML = '<option value="">Scanning...</option>';
+    list.style.display = "block";
+    
+    db.ref("board1/wifi_config/scan_request").set(true)
+      .then(() => {
+        let attempts = 0;
+        const poll = setInterval(() => {
+          db.ref("board1/wifi_config/scan_time").once("value").then(timeSnap => {
+            const scanTime = timeSnap.val();
+            if (scanTime && scanTime !== lastScanTime) {
+              lastScanTime = scanTime;
+              clearInterval(poll);
+              select.innerHTML = '<option value="">Select Network</option>';
+              db.ref("board1/wifi_config/scan_count").once("value").then(countSnap => {
+                const count = countSnap.val() || 0;
+                for (let i = 0; i < count && i < 5; i++) {
+                  const netRef = db.ref("board1/wifi_config/networks/" + i);
+                  netRef.once("value").then(netSnap => {
+                    const net = netSnap.val();
+                    if (net && net.ssid) {
+                      const opt = document.createElement("option");
+                      opt.value = net.ssid;
+                      opt.textContent = `${net.ssid} (${net.rssi} dBm)`;
+                      select.appendChild(opt);
+                    }
+                  });
+                }
+              });
+              btn.disabled = false;
+              btn.innerText = "Scan Networks";
+            }
+          });
+          attempts++;
+          if (attempts > 30) {
+            clearInterval(poll);
+            select.innerHTML = '<option value="">Timeout - try again</option>';
+            btn.disabled = false;
+            btn.innerText = "Scan Networks";
+          }
+        }, 1000);
+      })
+      .catch(err => {
+        alert("Scan failed: " + err.message);
+        btn.disabled = false;
+        btn.innerText = "Scan Networks";
+      });
+  }
+  
+  function connectWiFi() {
+    const ssid = document.getElementById("wifiSelect").value;
+    const pass = document.getElementById("wifiPassword").value;
+    const save = document.getElementById("saveToFirebase").checked;
+    const btn = event.target;
+    
+    if (!ssid) {
+      alert("Please select a network");
+      return;
+    }
+    
+    btn.disabled = true;
+    btn.innerText = "Connecting...";
+    
+    wifiConfigRef.update({
+      connect_request: true,
+      connect_ssid: ssid,
+      connect_pass: pass,
+      connect_save: save
+    }).then(() => {
+      let attempts = 0;
+      const poll = setInterval(() => {
+        db.ref("board1/wifi_config/connect_result/success").once("value").then(snapshot => {
+          const val = snapshot.val();
+          if (val === true) {
+            clearInterval(poll);
+            alert("Connected! " + (save ? "Saved to Firebase." : "Not saved."));
+            updateWifiStatus();
+            btn.disabled = false;
+            btn.innerText = "Connect & Save";
+          } else if (val === false) {
+            clearInterval(poll);
+            db.ref("board1/wifi_config/connect_result/error").once("value").then(errSnap => {
+              alert("Failed: " + (errSnap.val() || "Unknown error"));
+              btn.disabled = false;
+              btn.innerText = "Connect & Save";
+            });
+          }
+        });
+        attempts++;
+        if (attempts > 30) {
+          clearInterval(poll);
+          alert("Timeout waiting for result");
+          btn.disabled = false;
+          btn.innerText = "Connect & Save";
+        }
+      }, 1000);
+    }).catch(err => {
+      alert("Error: " + err.message);
+      btn.disabled = false;
+      btn.innerText = "Connect & Save";
+    });
+  }
+  
+  function toggleCustomWifi(checked) {
+    document.getElementById("customWifiFields").style.display = checked ? "block" : "none";
+    if (checked) {
+      // Load current custom WiFi from Firebase
+      wifiConfigRef.once("value").then(snapshot => {
+        const data = snapshot.val();
+        if (data) {
+          document.getElementById("customSsid").value = data.custom_ssid || "";
+          document.getElementById("customPass").value = data.custom_password || "";
+          document.getElementById("useCustomWifi").checked = data.use_custom || false;
+        }
+      });
+    }
+  }
+  
+  function saveCustomWifi() {
+    const ssid = document.getElementById("customSsid").value.trim();
+    const pass = document.getElementById("customPass").value;
+    
+    if (!ssid) {
+      alert("Please enter SSID");
+      return;
+    }
+    
+    const btn = event.target;
+    btn.disabled = true;
+    btn.innerText = "Saving...";
+    
+    wifiConfigRef.update({
+      custom_ssid: ssid,
+      custom_password: pass,
+      use_custom: true
+    }).then(() => {
+      alert("Custom WiFi saved to Firebase!");
+      btn.disabled = false;
+      btn.innerText = "Save to Firebase";
+      updateWifiStatus();
+    }).catch(err => {
+      alert("Error: " + err.message);
+      btn.disabled = false;
+      btn.innerText = "Save to Firebase";
+    });
+  }
+  
+  function updateWifiStatus() {
+    // Real-time listener handles this now
+  }
+  
+  // Initial load
+  updateWifiStatus();
+  // Refresh status every 30 seconds
+  setInterval(updateWifiStatus, 30000);
+  </script>
+</body>
+</html>
