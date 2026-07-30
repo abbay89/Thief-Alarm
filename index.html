@@ -191,8 +191,6 @@
             <h2>End</h2>
             <p>Time: <span id="status14">Loading...</span></p>
             <input type="time" class="form-control" id="btn14" value="">
-            <hr class="my-2">
-            <small>WiFi: <span id="wifiStatus">Loading...</span></small>
           </div>
 
           <div class="relay-card">
@@ -212,6 +210,10 @@
 
           <div class="relay-card">
             <h2>WiFi Config</h2>
+            <div class="mb-2">
+              <small>Status: <span id="wifiStatus">Loading...</span></small><br>
+              <small>Online: <span id="lastOnline">-</span></small>
+            </div>
             <button class="btn btn-primary" id="scanWifiBtn" onclick="scanWiFi()">Scan Networks</button>
             <div id="wifiList" class="mt-2" style="display: none;">
               <select class="form-control" id="wifiSelect"></select>
@@ -381,6 +383,7 @@
 
       // Real-time wifi connection status
       const wifiStatusEl = document.getElementById("wifiStatus");
+      const lastOnlineEl = document.getElementById("lastOnline");
       db.ref("board1/wifi_config").on("value", (snapshot) => {
         const data = snapshot.val();
         if (data) {
@@ -392,6 +395,19 @@
             let ssid = data.last_connected || "";
             wifiStatusEl.innerText = ssid ? `${ssid} ❌` : "Disconnected ❌";
             wifiStatusEl.style.color = "red";
+          }
+          if (data.last_online) {
+            const t = data.last_online;
+            const yr = t.substring(0,4);
+            const mo = t.substring(5,7);
+            const dy = t.substring(8,10);
+            const hh = t.substring(11,13);
+            const mn = t.substring(14,16);
+            const ss = t.substring(17,19);
+            const d = new Date(yr, mo-1, dy, hh, mn, ss);
+            lastOnlineEl.innerText = d.toLocaleString();
+          } else {
+            lastOnlineEl.innerText = "-";
           }
         }
       });
