@@ -191,6 +191,8 @@
             <h2>End</h2>
             <p>Time: <span id="status14">Loading...</span></p>
             <input type="time" class="form-control" id="btn14" value="">
+            <hr class="my-2">
+            <small>WiFi: <span id="wifiStatus">Loading...</span></small>
           </div>
 
           <div class="relay-card">
@@ -210,7 +212,6 @@
 
           <div class="relay-card">
             <h2>WiFi Config</h2>
-            <p>Current: <span id="wifiStatus">Loading...</span></p>
             <button class="btn btn-primary" id="scanWifiBtn" onclick="scanWiFi()">Scan Networks</button>
             <div id="wifiList" class="mt-2" style="display: none;">
               <select class="form-control" id="wifiSelect"></select>
@@ -377,6 +378,23 @@
       //     db.ref("/" + relay.path).set(false);
       //   });
       // };
+
+      // Real-time wifi connection status
+      const wifiStatusEl = document.getElementById("wifiStatus");
+      db.ref("board1/wifi_config").on("value", (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+          if (data.connected) {
+            let ssid = data.last_connected || "Unknown";
+            wifiStatusEl.innerText = `${ssid} ✅`;
+            wifiStatusEl.style.color = "green";
+          } else {
+            let ssid = data.last_connected || "";
+            wifiStatusEl.innerText = ssid ? `${ssid} ❌` : "Disconnected ❌";
+            wifiStatusEl.style.color = "red";
+          }
+        }
+      });
     }
 
     document.getElementById("logoutBtn").onclick = () => {
@@ -552,21 +570,7 @@ function scanWiFi() {
   }
   
   function updateWifiStatus() {
-    wifiConfigRef.once("value").then(snapshot => {
-      const data = snapshot.val();
-      const statusEl = document.getElementById("wifiStatus");
-      if (data) {
-        if (data.use_custom && data.custom_ssid) {
-          statusEl.innerText = `Custom: ${data.custom_ssid} ${data.connected ? "✅" : "❌"}`;
-        } else if (data.last_connected) {
-          statusEl.innerText = `Default: ${data.last_connected} ✅`;
-        } else {
-          statusEl.innerText = "Not configured";
-        }
-      } else {
-        statusEl.innerText = "Loading...";
-      }
-    });
+    // Real-time listener handles this now
   }
   
   // Initial load
