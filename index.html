@@ -207,6 +207,33 @@
               <option value="1">Telegram</option>
             </select>
           </div>
+
+          <div class="relay-card">
+            <h2>WiFi Config</h2>
+            <p>Current: <span id="wifiStatus">Loading...</span></p>
+            <button class="btn btn-primary" id="scanWifiBtn" onclick="scanWiFi()">Scan Networks</button>
+            <div id="wifiList" class="mt-2" style="display: none;">
+              <select class="form-control" id="wifiSelect"></select>
+              <input type="password" class="form-control mt-2" id="wifiPassword" placeholder="Password">
+              <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" id="saveToFirebase" checked>
+                <label class="form-check-label" for="saveToFirebase">Save to Firebase</label>
+              </div>
+              <button class="btn btn-success mt-2" onclick="connectWiFi()">Connect & Save</button>
+            </div>
+            <div class="form-check mt-2">
+              <input class="form-check-input" type="checkbox" id="useCustomWifi" onchange="toggleCustomWifi(this.checked)">
+              <label class="form-check-label" for="useCustomWifi">Use Custom WiFi (from Firebase)</label>
+            </div>
+            <div id="customWifiFields" style="display: none; margin-top: 10px;">
+              <input type="text" class="form-control" id="customSsid" placeholder="Custom SSID">
+              <input type="password" class="form-control mt-2" id="customPass" placeholder="Custom Password">
+              <button class="btn btn-warning mt-2" onclick="saveCustomWifi()">Save to Firebase</button>
+            </div>
+            <div class="mt-2">
+              <small class="text-muted">Default: iconnet / BlackPanther (no Firebase needed)</small>
+            </div>
+          </div>
         </div>
 
         <!-- <button id="allOffBtn">All OFF</button> -->
@@ -364,6 +391,176 @@
           alert("Logout failed: " + error.message);
         });
     };
+  
+  // WiFi Configuration Functions
+  const db = firebase.database();
+  const wifiConfigRef = db.ref("board1/wifi_config");
+  
+  function scanWiFi() {
+    const btn = document.getElementById("scanWifiBtn");
+    const list = document.getElementById("wifiList");
+    const select = document.getElementById("wifiSelect");
+    
+    btn.disabled = true;
+    btn.innerText = "Scanning...";
+    select.innerHTML = '<option value="">Scanning...</option>';
+    list.style.display = "block";
+    
+    // Use Firebase function to trigger ESP32 scan
+    db.ref("board1/wifi_config/scan_request").set(true)
+      .then(() => {
+        // Poll for results
+        let attempts = 0;
+        const poll = setInterval(() => {
+          db.ref("board1/wifi_config/scan_results").once("value").then(snapshot => {
+            const networks = snapshot.val();
+            if (networks && networks.length > 0) {
+              clearInterval(poll);
+              select.innerHTML = '<option value="">Select Network</option>';
+              networks.forEach(net => {
+                const opt = document.createElement("option");
+                opt.value = net.ssid;
+                opt.textContent = `${net.ssid} (${net.rssi} dBm) ${net.encrypted ? "🔒" : "🔓"}`;
+                select.appendChild(opt);
+              });
+              btn.disabled = false;
+              btn.innerText = "Scan Networks";
+            }
+          });
+          attempts++;
+          if (attempts > 20) {
+            clearInterval(poll);
+            select.innerHTML = '<option value="">Timeout - try again</option>';
+            btn.disabled = false;
+            btn.innerText = "Scan Networks";
+          }
+        }, 1000);
+      })
+      .catch(err => {
+        alert("Scan failed: " + err.message);
+        btn.disabled = false;
+        btn.innerText = "Scan Networks";
+      });
+  }
+  
+  function connectWiFi() {
+    const ssid = document.getElementById("wifiSelect").value;
+    const pass = document.getElementById("wifiPassword").value;
+    const save = document.getElementById("saveToFirebase").checked;
+    
+    if (!ssid) {
+      alert("Please select a network");
+      return;
+    }
+    
+    const btn = event.target;
+    btn.disabled = true;
+    btn.innerText = "Connecting...";
+    
+    wifiConfigRef.update({
+      connect_request: true,
+      connect_ssid: ssid,
+      connect_pass: pass,
+      connect_save: save
+    }).then(() => {
+      // Poll for result
+      let attempts = 0;
+      const poll = setInterval(() => {
+        db.ref("board1/wifi_config/connect_result").once("value").then(snapshot => {
+          const result = snapshot.val();
+          if (result) {
+            clearInterval(poll);
+            if (result.success) {
+              alert("Connected! " + (save ? "Saved to Firebase." : "Not saved."));
+              updateWifiStatus();
+            } else {
+              alert("Failed: " + (result.error || "Unknown error"));
+            }
+            btn.disabled = false;
+            btn.innerText = "Connect & Save";
+          }
+        });
+        attempts++;
+        if (attempts > 30) {
+          clearInterval(poll);
+          alert("Timeout waiting for result");
+          btn.disabled = false;
+          btn.innerText = "Connect & Save";
+        }
+      }, 1000);
+    }).catch(err => {
+      alert("Error: " + err.message);
+      btn.disabled = false;
+      btn.innerText = "Connect & Save";
+    });
+  }
+  
+  function toggleCustomWifi(checked) {
+    document.getElementById("customWifiFields").style.display = checked ? "block" : "none";
+    if (checked) {
+      // Load current custom WiFi from Firebase
+      wifiConfigRef.once("value").then(snapshot => {
+        const data = snapshot.val();
+        if (data) {
+          document.getElementById("customSsid").value = data.custom_ssid || "";
+          document.getElementById("customPass").value = data.custom_password || "";
+          document.getElementById("useCustomWifi").checked = data.use_custom || false;
+        }
+      });
+    }
+  }
+  
+  function saveCustomWifi() {
+    const ssid = document.getElementById("customSsid").value.trim();
+    const pass = document.getElementById("customPass").value;
+    
+    if (!ssid) {
+      alert("Please enter SSID");
+      return;
+    }
+    
+    const btn = event.target;
+    btn.disabled = true;
+    btn.innerText = "Saving...";
+    
+    wifiConfigRef.update({
+      custom_ssid: ssid,
+      custom_password: pass,
+      use_custom: true
+    }).then(() => {
+      alert("Custom WiFi saved to Firebase!");
+      btn.disabled = false;
+      btn.innerText = "Save to Firebase";
+      updateWifiStatus();
+    }).catch(err => {
+      alert("Error: " + err.message);
+      btn.disabled = false;
+      btn.innerText = "Save to Firebase";
+    });
+  }
+  
+  function updateWifiStatus() {
+    wifiConfigRef.once("value").then(snapshot => {
+      const data = snapshot.val();
+      const statusEl = document.getElementById("wifiStatus");
+      if (data) {
+        if (data.use_custom && data.custom_ssid) {
+          statusEl.innerText = `Custom: ${data.custom_ssid} ${data.connected ? "✅" : "❌"}`;
+        } else if (data.last_connected) {
+          statusEl.innerText = `Default: ${data.last_connected} ✅`;
+        } else {
+          statusEl.innerText = "Not configured";
+        }
+      } else {
+        statusEl.innerText = "Loading...";
+      }
+    });
+  }
+  
+  // Initial load
+  updateWifiStatus();
+  // Refresh status every 30 seconds
+  setInterval(updateWifiStatus, 30000);
   </script>
 </body>
 </html>
