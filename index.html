@@ -373,27 +373,35 @@
     });
 
     function parsePresenceString(state) {
-      // Format from ESP: "2026-7-31 14:30:00 100cm" (or "... MOVING 100cm")
+      // Handles BOTH formats written by the ESP:
+      //  old: "126-6-31 14:30:00 100cm"  (tm_year since 1900, tm_mon 0-based)
+      //  new: "2026-07-31 14:30:00 100cm" (strftime %Y-%m-%d %H:%M:%S)
       if (!state) return null;
-      const m = state.match(/(\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{2}:\d{2})[^]*?(\d+)\s*cm/);
+      const m = state.match(/(\d{3,4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})/);
       if (!m) return null;
-      const parts = state.split(' ');
-      let cm = '';
-      for (let i = parts.length - 1; i >= 0; i--) {
-        if (/\d/.test(parts[i]) && parts[i].includes('cm')) {
-          cm = parts[i];
-          break;
-        }
-      }
+      let year = parseInt(m[1], 10);
+      let month = parseInt(m[2], 10);
+      if (year < 1000) { year += 1900; month += 1; } // old format: fix year and 0-based month
+      const time = new Date(year, month - 1, parseInt(m[3],10), parseInt(m[4],10), parseInt(m[5],10), parseInt(m[6],10));
+      const cmMatch = state.match(/(\d+)\s*cm/);
+      const distance = cmMatch ? cmMatch[1] + "cm" : "--";
       const isMoving = /moving/i.test(state);
-      return { time: m[1], distance: cm || (m[2] + 'cm'), moving: isMoving };
+      return { time: time, distance: distance, moving: isMoving };
     }
 
     function formatTime(raw) {
       if (!raw) return "--";
-      const m = raw.match(/(\d{4})-(\d{1,2})-(\d{1,2}) (\d{1,2}):(\d{2}):(\d{2})/);
+      if (raw instanceof Date) {
+        return isNaN(raw.getTime()) ? "--" : raw.toLocaleString();
+      }
+      // String format "2026-07-31 14:30:00" or old "126-6-31 14:30:00"
+      const m = String(raw).match(/(\d{3,4})-(\d{1,2})-(\d{1,2}) (\d{1,2}):(\d{2}):(\d{2})/);
       if (!m) return raw;
-      return new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]).toLocaleString();
+      let year = parseInt(m[1], 10);
+      let month = parseInt(m[2], 10);
+      if (year < 1000) { year += 1900; month += 1; }
+      const d = new Date(year, month - 1, +m[3], +m[4], +m[5], +m[6]);
+      return isNaN(d.getTime()) ? raw : d.toLocaleString();
     }
 
     function startRelayControl() {
