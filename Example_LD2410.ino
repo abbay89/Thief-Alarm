@@ -168,6 +168,8 @@ unsigned long notificationInterval = 180;  // seconds, pulled from Firebase path
 int movingMinRange = 0;   // cm, pulled from Firebase path 22
 int movingMaxRange = 600; // cm, pulled from Firebase path 23
 int buzzerTone = 1;       // selected alarm melody, pulled from Firebase path 24
+bool triggerMoving = true;   // moving target triggers notif/buzzer, path 25
+bool triggerStationary = false; // stationary target triggers notif/buzzer, path 26
 bool errorState = false;
 bool sensorState = false;
 bool useCustomWiFi = false;
@@ -467,27 +469,38 @@ void printData() {
   }
 
   if(sensor.presenceDetected()){
-    if (sensor.movingTargetDetected()) {
-      targetDistance = sensor.movingTargetDistance();
+    if (sensor.movingTargetDetected() || sensor.stationaryTargetDetected()) {
+      bool shouldTrigger = false;
+      if (sensor.movingTargetDetected() && triggerMoving) {
+        targetDistance = sensor.movingTargetDistance();
+        shouldTrigger = true;
+      } else if (sensor.stationaryTargetDetected() && triggerStationary) {
+        targetDistance = sensor.stationaryTargetDistance();
+        shouldTrigger = true;
+      }
 
-      bool withinMovingRange = (targetDistance >= movingMinRange && targetDistance <= movingMaxRange);
+      if (shouldTrigger) {
+        bool withinMovingRange = (targetDistance >= movingMinRange && targetDistance <= movingMaxRange);
 
-      if (withinWorkingHours && withinMovingRange) {
-        unsigned long now = millis();
-        if (now - lastNotificationTime >= notificationInterval * 1000UL || lastNotificationTime == 0) {
-          lastNotificationTime = now;
-          notificationSent = true;
+        if (withinWorkingHours && withinMovingRange) {
+          unsigned long now = millis();
+          if (now - lastNotificationTime >= notificationInterval * 1000UL || lastNotificationTime == 0) {
+            lastNotificationTime = now;
+            notificationSent = true;
 
-          playAlarmMelody(buzzerTone);
+            playAlarmMelody(buzzerTone);
 
-          Serial.print("NOTIF TRIGGERED! Distance: ");
-          Serial.print(targetDistance);
-          Serial.println("cm");
+            Serial.print("NOTIF TRIGGERED! Distance: ");
+            Serial.print(targetDistance);
+            Serial.println("cm");
+          } else {
+            unsigned long remain = (notificationInterval * 1000UL - (now - lastNotificationTime)) / 1000;
+            Serial.print("✅ Notif cooldown: ");
+            Serial.print(remain);
+            Serial.println("s remaining");
+          }
         } else {
-          unsigned long remain = (notificationInterval * 1000UL - (now - lastNotificationTime)) / 1000;
-          Serial.print("✅ Notif cooldown: ");
-          Serial.print(remain);
-          Serial.println("s remaining");
+          notificationSent = false;
         }
       } else {
         notificationSent = false;
@@ -680,6 +693,8 @@ void loop() {
         Database.get(aClient, "board1/outputs/digital/22", pollResultCallback, false, "dig_22");
         Database.get(aClient, "board1/outputs/digital/23", pollResultCallback, false, "dig_23");
         Database.get(aClient, "board1/outputs/digital/24", pollResultCallback, false, "dig_24");
+        Database.get(aClient, "board1/outputs/digital/25", pollResultCallback, false, "dig_25");
+        Database.get(aClient, "board1/outputs/digital/26", pollResultCallback, false, "dig_26");
       }
 
       // Act on flags set by pollResultCallback (run outside the callback)
@@ -1140,6 +1155,12 @@ void pollResultCallback(AsyncResult &aResult) {
     if (tone >= 0 && tone <= 6) {
       buzzerTone = tone;
     }
+  } else if (uid == "dig_25") {
+    triggerMoving = RTDB.to<bool>();
+    Serial.printf("poll digital/25 triggerMoving = %d\n", triggerMoving);
+  } else if (uid == "dig_26") {
+    triggerStationary = RTDB.to<bool>();
+    Serial.printf("poll digital/26 triggerStationary = %d\n", triggerStationary);
   }
 }
 

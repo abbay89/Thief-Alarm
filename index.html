@@ -376,6 +376,19 @@
         </div>
 
         <div class="card">
+          <h2>Notification Trigger</h2>
+          <p>Choose which targets fire notif & buzzer:</p>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="btn25">
+            <label class="form-check-label" for="btn25">Moving</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="btn26">
+            <label class="form-check-label" for="btn26">Stationary</label>
+          </div>
+        </div>
+
+        <div class="card">
           <h2>Notification Method</h2>
           <p>Mode: <b id="status16">Loading...</b></p>
           <select class="form-control" id="btn16">
@@ -556,6 +569,8 @@
         { id: 22, path: "board1/outputs/digital/22" },
         { id: 23, path: "board1/outputs/digital/23" },
         { id: 24, path: "board1/outputs/digital/24" },
+        { id: 25, path: "board1/outputs/digital/25" },
+        { id: 26, path: "board1/outputs/digital/26" },
       ];
 
       relays.forEach(relay => {
@@ -570,7 +585,11 @@
               statusText.innerText = state ? "ON" : "OFF";
               toggleButton.style.background = state ? "linear-gradient(90deg,#16a34a,#22c55e)" : "linear-gradient(90deg,#dc2626,#ef4444)";
             } else if (toggleButton.tagName === 'INPUT') {
-              statusText.innerText = state;
+              if (toggleButton.type === 'checkbox') {
+                toggleButton.checked = !!state;
+              } else {
+                statusText.innerText = state;
+              }
             } else if (toggleButton.tagName === 'SELECT') {
               const toneNames = ["Silent", "Single Beep", "Continuous", "Fast Pulses", "Double Beeps", "Three Beeps", "Siren"];
               let label = state;
@@ -593,7 +612,9 @@
               relayRef.get().then(snap => relayRef.set(!snap.val() ? 1 : 0));
             };
           } else if (toggleButton.tagName === 'INPUT') {
-            if (toggleButton.type === 'number') {
+            if (toggleButton.type === 'checkbox') {
+              toggleButton.addEventListener('change', e => relayRef.set(e.target.checked));
+            } else if (toggleButton.type === 'number') {
               toggleButton.addEventListener('change', e => relayRef.set(parseInt(e.target.value) || 0));
             } else {
               toggleButton.addEventListener('input', e => relayRef.set(e.target.value));
