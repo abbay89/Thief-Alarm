@@ -220,6 +220,20 @@
       margin: 0 auto 20px;
       width: 200px;
     }
+    #restartBtn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin: 10px auto 16px;
+      width: 90%;
+      max-width: 360px;
+      padding: 18px;
+      font-size: 1.3rem;
+      border-radius: 16px;
+      box-shadow: 0 8px 24px rgba(239, 68, 68, 0.35);
+    }
+    #restartBtn .restart-icon { font-size: 1.8rem; }
     footer { text-align: center; color: var(--muted); font-size: 0.85rem; margin-top: 30px; }
     .muted-small { color: var(--muted); font-size: 0.8rem; }
     .form-check { margin: 8px 0; display: flex; align-items: center; gap: 8px; font-size: 0.9rem; }
@@ -397,6 +411,7 @@
         </div>
       </div>
 
+      <button id="restartBtn" class="btn btn-danger btn-restart" onclick="restartESP()">🔄 Restart Device</button>
       <button id="logoutBtn" class="btn btn-secondary">Logout</button>
     </div>
 
@@ -607,6 +622,19 @@
           }
         }
       });
+    }
+
+    function restartESP() {
+      if (!confirm("Restart ESP32 device now?")) return;
+      const btn = document.getElementById("restartBtn");
+      btn.disabled = true;
+      btn.innerHTML = '<span class="restart-icon">⏳</span> Restarting...';
+      db.ref("board1/wifi_config/restart_request").set(true)
+        .catch(err => {
+          alert("Restart request failed: " + err.message);
+          btn.disabled = false;
+          btn.innerHTML = '<span class="restart-icon">🔄</span> Restart Device';
+        });
     }
 
     document.getElementById("logoutBtn").onclick = () => {

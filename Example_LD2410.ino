@@ -31,6 +31,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <time.h>
+#include <Preferences.h>
 
 #include <ArduinoJson.h>
 
@@ -128,6 +129,7 @@ String wifiConfigPath = "board1/wifi_config";
 // Async polling state
 volatile bool pollScanRequest = false;
 volatile bool pollConnectRequest = false;
+volatile bool pollRestartRequest = false;
 volatile bool pollUseCustomChanged = false;
 volatile bool pollCustomWiFiUpdated = false;
 bool lastPolledUseCustom = false;
@@ -170,6 +172,7 @@ String customWiFiSSID = "";
 String customWiFiPass = "";
 bool wifiConnected = false;
 bool pendingWifiSync = true;
+Preferences prefs;
 bool lastPresenceStatus = false;
 bool presenceInit = false;
 IPAddress lastTelegramIP;
@@ -527,6 +530,8 @@ void setup() {
   Serial.begin(SERIAL_BAUD_RATE);
   delay(1000);
 
+  prefs.begin("wifi", false);
+
   // Connect to WiFi with retry
   int wifiRetries = 0;
   while (!connectToWiFi()) {
@@ -662,6 +667,7 @@ void loop() {
         Database.get(aClient, "board1/wifi_config/connect_pass", pollResultCallback, false, "conn_pass");
         Database.get(aClient, "board1/wifi_config/connect_save", pollResultCallback, false, "conn_save");
         Database.get(aClient, "board1/wifi_config/connect_request", pollResultCallback, false, "conn_req");
+        Database.get(aClient, "board1/wifi_config/restart_request", pollResultCallback, false, "restart_req");
         Database.get(aClient, WIFI_USE_CUSTOM_PATH, pollResultCallback, false, "use_custom");
         Database.get(aClient, WIFI_CUSTOM_SSID_PATH, pollResultCallback, false, "custom_ssid");
         Database.get(aClient, WIFI_CUSTOM_PASS_PATH, pollResultCallback, false, "custom_pass");
@@ -684,6 +690,15 @@ void loop() {
       if (pollConnectRequest) {
         pollConnectRequest = false;
         processConnectRequest();
+      }
+      if (pollRestartRequest) {
+        pollRestartRequest = false;
+        Serial.println(">>> RESTART REQUESTED FROM DASHBOARD <<<");
+        if (app.ready()) {
+          Database.set<bool>(aClient, "board1/wifi_config/restart_request", false);
+        }
+        delay(100);
+        ESP.restart();
       }
       if (pollUseCustomChanged) {
         pollUseCustomChanged = false;
@@ -1042,6 +1057,9 @@ void pollResultCallback(AsyncResult &aResult) {
   } else if (uid == "conn_req") {
     Serial.printf("poll connect_request = %d\n", RTDB.to<bool>());
     if (RTDB.to<bool>()) pollConnectRequest = true;
+  } else if (uid == "restart_req") {
+    Serial.printf("poll restart_request = %d\n", RTDB.to<bool>());
+    if (RTDB.to<bool>()) pollRestartRequest = true;
   } else if (uid == "use_custom") {
     bool useCustom = RTDB.to<bool>();
     if (useCustom != lastPolledUseCustom) {
@@ -1244,7 +1262,36 @@ void scanAndSendResults() {
 bool connectToWiFi() {
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
-  
+
+  String savedSSID = prefs.getString("ssid", "");
+  String savedPass = prefs.getString("pass", "");
+
+  // Try last saved (latest) SSID first
+  if (savedSSID.length() > 0) {
+    Serial.printf("Trying saved SSID: %s\n", savedSSID.c_str());
+    WiFi.disconnect(true);
+    delay(100);
+    WiFi.begin(savedSSID.c_str(), savedPass.c_str());
+
+    unsigned long startTime = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - startTime < 20000) {
+      delay(500);
+      Serial.print(".");
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("\n✅ Connected to saved SSID!");
+      Serial.print("IP: ");
+      Serial.println(WiFi.localIP());
+      Serial.print("SSID: ");
+      Serial.println(savedSSID);
+      Serial.print("RSSI: ");
+      Serial.println(WiFi.RSSI());
+      return true;
+    }
+    Serial.println("\n❌ Saved SSID failed, trying defaults...");
+  }
+
   for (int i = 0; i < DEFAULT_WIFI_COUNT; i++) {
     Serial.printf("Trying: %s\n", DEFAULT_WIFI_SSID[i]);
     WiFi.disconnect(true);
@@ -1301,6 +1348,11 @@ void processConnectRequest() {
     if (WiFi.status() == WL_CONNECTED) {
       Serial.println("\n✅ Connected!");
       if (connSave) saveCustomWiFiToFirebase(connSSID, connPass);
+      prefs.begin("wifi", false);
+      prefs.putString("ssid", connSSID);
+      prefs.putString("pass", connPass);
+      prefs.end();
+      Serial.println("Saved credentials to NVS (latest SSID)");
       Database.set<bool>(aClient, "board1/wifi_config/connect_result/success", true);
       Database.set<String>(aClient, "board1/wifi_config/last_connected", connSSID);
       Database.set<bool>(aClient, "board1/wifi_config/connected", true);
