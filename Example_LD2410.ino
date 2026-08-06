@@ -468,6 +468,13 @@ void printData() {
     Serial.print("MODE DEBUG MOVING AND TARGET STATIC DETECTED.");
   }
 
+  // Master switch: Sensor Notification button (path 12). If OFF, force all
+  // notifications and buzzer off. If ON, normal logic applies below.
+  if (!sensorState) {
+    notificationSent = false;
+    digitalWrite(BUZZER_PIN, LOW);
+  }
+
   if(sensor.presenceDetected()){
     if (sensor.movingTargetDetected() || sensor.stationaryTargetDetected()) {
       bool shouldTrigger = false;
@@ -482,7 +489,7 @@ void printData() {
       if (shouldTrigger) {
         bool withinMovingRange = (targetDistance >= movingMinRange && targetDistance <= movingMaxRange);
 
-        if (withinWorkingHours && withinMovingRange) {
+        if (sensorState && withinWorkingHours && withinMovingRange) {
           unsigned long now = millis();
           if (now - lastNotificationTime >= notificationInterval * 1000UL || lastNotificationTime == 0) {
             lastNotificationTime = now;
