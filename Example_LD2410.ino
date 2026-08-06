@@ -427,11 +427,7 @@ void printData() {
         targetDistance = sensor.movingTargetDistance();
       }
 
-      bool withinMovingRange = true;
-      if (sensor.movingTargetDetected()) {
-        int movingDist = sensor.movingTargetDistance();
-        withinMovingRange = (movingDist >= movingMinRange && movingDist <= movingMaxRange);
-      }
+      bool withinMovingRange = (targetDistance >= movingMinRange && targetDistance <= movingMaxRange);
 
       if (withinWorkingHours && withinMovingRange) {
         unsigned long now = millis();
