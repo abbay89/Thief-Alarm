@@ -508,27 +508,40 @@
 
     // Auto-restore session on refresh
     firebase.auth().onAuthStateChanged(user => {
-      if (user) {
-        const key = emailKey(user.email);
+      if (!user) {
+        showLogin();
+        return;
+      }
+      // Fixed admin is always allowed, no DB record needed
+      if (user.email === ALLOWED_ADMIN_EMAIL) {
         const db = firebase.database();
-        db.ref("board1/users/" + key).once("value").then(snap => {
+        const key = emailKey(user.email);
+        db.ref("board1/users/" + key).set({ email: user.email, role: "admin", invitedAt: Date.now() })
+          .then(() => {})
+          .catch(() => {});
+        renderAdminPanel();
+        showDashboard();
+        return;
+      }
+      // Other users: must be invited (present in DB)
+      const db = firebase.database();
+      const key = emailKey(user.email);
+      db.ref("board1/users/" + key).once("value")
+        .then(snap => {
           const record = snap.val();
-          const isAdmin = user.email === ALLOWED_ADMIN_EMAIL || (record && record.role === "admin");
-          if (record || isAdmin) {
-            // Ensure fixed admin is recorded
-            if (user.email === ALLOWED_ADMIN_EMAIL && !record) {
-              db.ref("board1/users/" + key).set({ email: user.email, role: "admin", invitedAt: Date.now() });
-            }
-            if (isAdmin) renderAdminPanel();
+          if (record) {
+            if (record.role === "admin") renderAdminPanel();
             showDashboard();
           } else {
             firebase.auth().signOut();
             alert("Your account is not authorized. Ask an admin to invite you.");
           }
+        })
+        .catch(err => {
+          console.error("Auth check failed:", err);
+          firebase.auth().signOut();
+          alert("Cannot verify access. Check Firebase Realtime Database rules for board1/users.");
         });
-      } else {
-        showLogin();
-      }
     });
 
     loginBtn.addEventListener("click", () => {
