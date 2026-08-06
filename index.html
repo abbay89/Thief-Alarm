@@ -72,6 +72,15 @@
       font-weight: 600;
     }
     #loginForm button:hover { opacity: 0.9; }
+    #loginForm h2 { margin: 0 0 10px; font-size: 1.3rem; }
+    #authLinks { display: flex; justify-content: space-between; margin-top: 14px; font-size: 0.85rem; }
+    #authLinks a { color: var(--accent); text-decoration: none; }
+    #authLinks a:hover { text-decoration: underline; }
+    #inviteBtn { margin-top: 4px; }
+    .user-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: #0b1220; border-radius: 8px; margin-bottom: 8px; font-size: 0.85rem; }
+    .user-item .badge-admin { background: rgba(249,115,22,0.2); color: #f97316; padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; }
+    .user-item button { background: #ef4444; border: none; color: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 0.75rem; }
+    .user-item button:hover { opacity: 0.85; }
 
     /* Presence cards */
     .presence-grid {
@@ -283,9 +292,29 @@
 
     <!-- Login form -->
     <div id="loginForm">
+      <h2 id="authTitle">Login</h2>
       <input type="email" id="email" placeholder="Enter Email" required />
       <input type="password" id="password" placeholder="Enter Password" required />
       <button id="loginBtn">Login</button>
+      <div id="authLinks">
+        <a href="#" id="forgotLink">Forgot password?</a>
+        <a href="#" id="toggleAuthMode">Invited? Create Account</a>
+      </div>
+    </div>
+
+    <!-- Invite/Admin management -->
+    <div id="adminPanel" style="display:none;">
+      <div class="card" style="margin: 0 auto 30px; max-width: 420px;">
+        <h2>Invite User</h2>
+        <p>Add a user by email. They can then create an account.</p>
+        <input type="email" class="form-control" id="inviteEmail" placeholder="user@email.com">
+        <button class="btn btn-primary" id="inviteBtn">Invite User</button>
+        <div class="form-check" style="margin-top:10px;">
+          <input class="form-check-input" type="checkbox" id="makeAdmin">
+          <label class="form-check-label" for="makeAdmin">Grant admin role</label>
+        </div>
+        <div id="userList" style="margin-top:12px;"></div>
+      </div>
     </div>
 
     <!-- Dashboard -->
@@ -452,6 +481,55 @@
     const loginForm = document.getElementById("loginForm");
     const dashboard = document.getElementById("dashboard");
     const loginBtn = document.getElementById("loginBtn");
+    const adminPanel = document.getElementById("adminPanel");
+
+    // Fixed admin email (can invite/reset other users)
+    const ALLOWED_ADMIN_EMAIL = "abbay89@gmail.com";
+    let authMode = "login";
+
+    // Keep session after refresh
+    firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+
+    function emailKey(email) {
+      return email.toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+    }
+
+    function showLogin() {
+      loginForm.style.display = "block";
+      dashboard.style.display = "none";
+      adminPanel.style.display = "none";
+    }
+
+    function showDashboard() {
+      loginForm.style.display = "none";
+      dashboard.style.display = "block";
+      startRelayControl();
+    }
+
+    // Auto-restore session on refresh
+    firebase.auth().onAuthStateChanged(user => {
+      if (user) {
+        const key = emailKey(user.email);
+        const db = firebase.database();
+        db.ref("board1/users/" + key).once("value").then(snap => {
+          const record = snap.val();
+          const isAdmin = user.email === ALLOWED_ADMIN_EMAIL || (record && record.role === "admin");
+          if (record || isAdmin) {
+            // Ensure fixed admin is recorded
+            if (user.email === ALLOWED_ADMIN_EMAIL && !record) {
+              db.ref("board1/users/" + key).set({ email: user.email, role: "admin", invitedAt: Date.now() });
+            }
+            if (isAdmin) renderAdminPanel();
+            showDashboard();
+          } else {
+            firebase.auth().signOut();
+            alert("Your account is not authorized. Ask an admin to invite you.");
+          }
+        });
+      } else {
+        showLogin();
+      }
+    });
 
     loginBtn.addEventListener("click", () => {
       const email = document.getElementById("email").value.trim();
@@ -460,14 +538,102 @@
         alert("Please enter email and password.");
         return;
       }
-      firebase.auth().signInWithEmailAndPassword(email, password)
-        .then(() => {
-          loginForm.style.display = "none";
-          dashboard.style.display = "block";
-          startRelayControl();
-        })
-        .catch(error => alert("Firebase login failed: " + error.message));
+      if (authMode === "login") {
+        firebase.auth().signInWithEmailAndPassword(email, password)
+          .catch(error => alert("Firebase login failed: " + error.message));
+      } else {
+        // Register: only allowed if invited in DB
+        const db = firebase.database();
+        const key = emailKey(email);
+        db.ref("board1/users/" + key).once("value").then(snap => {
+          const record = snap.val();
+          const isFixedAdmin = email === ALLOWED_ADMIN_EMAIL;
+          if (!record && !isFixedAdmin) {
+            alert("This email has not been invited yet. Ask the admin to invite you first.");
+            return;
+          }
+          firebase.auth().createUserWithEmailAndPassword(email, password)
+            .then(cred => {
+              if (!record && isFixedAdmin) {
+                db.ref("board1/users/" + key).set({ email, role: "admin", invitedAt: Date.now() });
+              }
+              alert("Account created! You are now logged in.");
+            })
+            .catch(error => alert("Registration failed: " + error.message));
+        });
+      }
     });
+
+    document.getElementById("forgotLink").addEventListener("click", e => {
+      e.preventDefault();
+      const email = document.getElementById("email").value.trim();
+      if (!email) { alert("Enter your email address first."); return; }
+      firebase.auth().sendPasswordResetEmail(email)
+        .then(() => alert("Password reset email sent to " + email))
+        .catch(error => alert("Failed: " + error.message));
+    });
+
+    document.getElementById("toggleAuthMode").addEventListener("click", e => {
+      e.preventDefault();
+      authMode = (authMode === "login") ? "register" : "login";
+      document.getElementById("authTitle").innerText = (authMode === "login") ? "Login" : "Create Account";
+      loginBtn.innerText = (authMode === "login") ? "Login" : "Create Account";
+      document.getElementById("toggleAuthMode").innerText =
+        (authMode === "login") ? "Invited? Create Account" : "Back to Login";
+    });
+
+    // Admin: invite users
+    document.getElementById("inviteBtn").addEventListener("click", () => {
+      const email = document.getElementById("inviteEmail").value.trim();
+      const makeAdmin = document.getElementById("makeAdmin").checked;
+      if (!email) { alert("Enter an email to invite."); return; }
+      const db = firebase.database();
+      const key = emailKey(email);
+      db.ref("board1/users/" + key).set({
+        email,
+        role: makeAdmin ? "admin" : "user",
+        invitedAt: Date.now()
+      }).then(() => {
+        alert("Invited " + email + (makeAdmin ? " (admin)" : "") + ". They can now create an account.");
+        document.getElementById("inviteEmail").value = "";
+        renderAdminPanel();
+      }).catch(err => alert("Failed: " + err.message));
+    });
+
+    function renderAdminPanel() {
+      adminPanel.style.display = "block";
+      const list = document.getElementById("userList");
+      const db = firebase.database();
+      db.ref("board1/users").on("value", snap => {
+        list.innerHTML = "";
+        snap.forEach(child => {
+          const rec = child.val();
+          if (!rec || !rec.email) return;
+          const div = document.createElement("div");
+          div.className = "user-item";
+          const info = document.createElement("span");
+          info.innerHTML = rec.email +
+            (rec.role === "admin" ? ' <span class="badge-admin">ADMIN</span>' : "");
+          div.appendChild(info);
+          const rm = document.createElement("button");
+          rm.innerText = "Remove";
+          rm.onclick = () => {
+            if (confirm("Remove " + rec.email + "?")) {
+              db.ref("board1/users/" + child.key).remove();
+              // Also remove Firebase Auth account if possible (requires Admin SDK);
+              // here we only revoke DB access.
+              const authUser = firebase.auth().currentUser;
+              const targetIsSelf = authUser && emailKey(authUser.email) === child.key;
+              if (targetIsSelf) {
+                firebase.auth().signOut();
+              }
+            }
+          };
+          div.appendChild(rm);
+          list.appendChild(div);
+        });
+      });
+    }
 
     function parsePresenceString(state) {
       // Handles BOTH formats written by the ESP:
@@ -661,10 +827,14 @@
     document.getElementById("logoutBtn").onclick = () => {
       firebase.auth().signOut()
         .then(() => {
-          dashboard.style.display = "none";
-          loginForm.style.display = "block";
+          authMode = "login";
+          document.getElementById("authTitle").innerText = "Login";
+          loginBtn.innerText = "Login";
+          document.getElementById("toggleAuthMode").innerText = "Invited? Create Account";
           document.getElementById("email").value = "";
           document.getElementById("password").value = "";
+          adminPanel.style.display = "none";
+          showLogin();
         })
         .catch(error => alert("Logout failed: " + error.message));
     };
