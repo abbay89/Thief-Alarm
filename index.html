@@ -291,7 +291,7 @@
     <p class="subtitle text-center">LD2410 Radar Presence Monitor</p>
 
     <!-- Login form -->
-    <div id="loginForm">
+    <div id="loginForm" style="display:none;">
       <h2 id="authTitle">Login</h2>
       <input type="email" id="email" placeholder="Enter Email" required />
       <input type="password" id="password" placeholder="Enter Password" required />
@@ -300,6 +300,11 @@
         <a href="#" id="forgotLink">Forgot password?</a>
         <a href="#" id="toggleAuthMode">Invited? Create Account</a>
       </div>
+    </div>
+
+    <!-- Blank/loading state shown until auth state is known -->
+    <div id="authLoading" class="text-center" style="display:none; margin: 80px auto;">
+      <p class="muted-small">Loading...</p>
     </div>
 
     <!-- Invite/Admin management -->
@@ -482,6 +487,13 @@
     const dashboard = document.getElementById("dashboard");
     const loginBtn = document.getElementById("loginBtn");
     const adminPanel = document.getElementById("adminPanel");
+    const authLoading = document.getElementById("authLoading");
+
+    // Blank/loading by default; reveal only after auth state is known.
+    authLoading.style.display = "block";
+    loginForm.style.display = "none";
+    dashboard.style.display = "none";
+    adminPanel.style.display = "none";
 
     // Fixed admin email (can invite/reset other users)
     const ALLOWED_ADMIN_EMAIL = "abbay89@gmail.com";
@@ -495,14 +507,17 @@
     }
 
     function showLogin() {
+      authLoading.style.display = "none";
       loginForm.style.display = "block";
       dashboard.style.display = "none";
       adminPanel.style.display = "none";
     }
 
     function showDashboard() {
+      authLoading.style.display = "none";
       loginForm.style.display = "none";
       dashboard.style.display = "block";
+      adminPanel.style.display = "none";
       startRelayControl();
     }
 
