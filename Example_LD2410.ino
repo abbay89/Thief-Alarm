@@ -45,9 +45,9 @@
 #define USER_PASS "Pangeran89"
 
 // Default WiFi credentials (no DB needed)
-const char* DEFAULT_WIFI_SSID[] = {"iconnet", "Iconnet Baru_4G", "BlackPanther", "blackpanther"};
-const char* DEFAULT_WIFI_PASS[] = {"30062019", "30062019", "iniDiaPasswordnyaYah", "iniDiaPasswordnyaYah"};
-const int DEFAULT_WIFI_COUNT = 4;
+const char* DEFAULT_WIFI_SSID[] = {"Iconnet Baru_4G", "BlackPanther"};
+const char* DEFAULT_WIFI_PASS[] = {"30062019", "iniDiaPasswordnyaYah"};
+const int DEFAULT_WIFI_COUNT = 2;
 
 // Firebase paths
 #define WIFI_CONFIG_PATH "board1/wifi_config"
@@ -467,12 +467,8 @@ void printData() {
   }
 
   if(sensor.presenceDetected()){
-    if (sensor.movingTargetDetected() || sensor.stationaryTargetDetected()) {
-      if (sensor.stationaryTargetDetected()) {
-        targetDistance = sensor.stationaryTargetDistance();
-      } else {
-        targetDistance = sensor.movingTargetDistance();
-      }
+    if (sensor.movingTargetDetected()) {
+      targetDistance = sensor.movingTargetDistance();
 
       bool withinMovingRange = (targetDistance >= movingMinRange && targetDistance <= movingMaxRange);
 
@@ -496,6 +492,8 @@ void printData() {
       } else {
         notificationSent = false;
       }
+    }else{
+      notificationSent = false;
     }
   }else{
     
