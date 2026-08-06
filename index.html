@@ -299,6 +299,18 @@
         </div>
 
         <div class="card">
+          <h2>Moving Range Min</h2>
+          <p>Distance (cm): <b id="status22">Loading...</b></p>
+          <input type="number" class="form-control" id="btn22" min="0" value="">
+        </div>
+
+        <div class="card">
+          <h2>Moving Range Max</h2>
+          <p>Distance (cm): <b id="status23">Loading...</b></p>
+          <input type="number" class="form-control" id="btn23" min="0" value="">
+        </div>
+
+        <div class="card">
           <h2>Notification Method</h2>
           <p>Mode: <b id="status16">Loading...</b></p>
           <select class="form-control" id="btn16">
@@ -475,6 +487,8 @@
         { id: 14, path: "board1/outputs/digital/14" },
         { id: 16, path: "board1/outputs/digital/16" },
         { id: 17, path: "board1/outputs/digital/17" },
+        { id: 22, path: "board1/outputs/digital/22" },
+        { id: 23, path: "board1/outputs/digital/23" },
       ];
 
       relays.forEach(relay => {

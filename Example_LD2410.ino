@@ -160,6 +160,8 @@ bool notificationSent = false;
 unsigned long lastAttemptTime = 0;
 unsigned long lastNotificationTime = 0;
 unsigned long notificationInterval = 180;  // seconds, pulled from Firebase path 17
+int movingMinRange = 0;   // cm, pulled from Firebase path 22
+int movingMaxRange = 600; // cm, pulled from Firebase path 23
 bool errorState = false;
 bool sensorState = false;
 bool useCustomWiFi = false;
@@ -425,7 +427,13 @@ void printData() {
         targetDistance = sensor.movingTargetDistance();
       }
 
-      if (withinWorkingHours) {
+      bool withinMovingRange = true;
+      if (sensor.movingTargetDetected()) {
+        int movingDist = sensor.movingTargetDistance();
+        withinMovingRange = (movingDist >= movingMinRange && movingDist <= movingMaxRange);
+      }
+
+      if (withinWorkingHours && withinMovingRange) {
         unsigned long now = millis();
         if (now - lastNotificationTime >= notificationInterval * 1000UL || lastNotificationTime == 0) {
           lastNotificationTime = now;
@@ -629,6 +637,8 @@ void loop() {
         Database.get(aClient, "board1/outputs/digital/14", pollResultCallback, false, "dig_14");
         Database.get(aClient, "board1/outputs/digital/16", pollResultCallback, false, "dig_16");
         Database.get(aClient, "board1/outputs/digital/17", pollResultCallback, false, "dig_17");
+        Database.get(aClient, "board1/outputs/digital/22", pollResultCallback, false, "dig_22");
+        Database.get(aClient, "board1/outputs/digital/23", pollResultCallback, false, "dig_23");
       }
 
       // Act on flags set by pollResultCallback (run outside the callback)
@@ -1034,6 +1044,18 @@ void pollResultCallback(AsyncResult &aResult) {
     Serial.printf("poll digital/17 interval = %d min\n", intervalMinutes);
     if (intervalMinutes > 0) {
       notificationInterval = (unsigned long)intervalMinutes * 60UL;
+    }
+  } else if (uid == "dig_22") {
+    int minRange = RTDB.to<int>();
+    Serial.printf("poll digital/22 movingMinRange = %d cm\n", minRange);
+    if (minRange >= 0 && minRange < movingMaxRange) {
+      movingMinRange = minRange;
+    }
+  } else if (uid == "dig_23") {
+    int maxRange = RTDB.to<int>();
+    Serial.printf("poll digital/23 movingMaxRange = %d cm\n", maxRange);
+    if (maxRange > movingMinRange) {
+      movingMaxRange = maxRange;
     }
   }
 }
