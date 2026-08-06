@@ -348,6 +348,20 @@
         </div>
 
         <div class="card">
+          <h2>Alarm Tone</h2>
+          <p>Melody: <b id="status24">Loading...</b></p>
+          <select class="form-control" id="btn24">
+            <option value="0">Silent</option>
+            <option value="1">Single Beep</option>
+            <option value="2">Continuous</option>
+            <option value="3">Fast Pulses</option>
+            <option value="4">Double Beeps</option>
+            <option value="5">Three Beeps</option>
+            <option value="6">Siren (Wail)</option>
+          </select>
+        </div>
+
+        <div class="card">
           <h2>Notification Method</h2>
           <p>Mode: <b id="status16">Loading...</b></p>
           <select class="form-control" id="btn16">
@@ -526,6 +540,7 @@
         { id: 17, path: "board1/outputs/digital/17" },
         { id: 22, path: "board1/outputs/digital/22" },
         { id: 23, path: "board1/outputs/digital/23" },
+        { id: 24, path: "board1/outputs/digital/24" },
       ];
 
       relays.forEach(relay => {
@@ -542,7 +557,16 @@
             } else if (toggleButton.tagName === 'INPUT') {
               statusText.innerText = state;
             } else if (toggleButton.tagName === 'SELECT') {
-              statusText.innerText = state == 1 ? "Telegram" : "WhatsApp";
+              const toneNames = ["Silent", "Single Beep", "Continuous", "Fast Pulses", "Double Beeps", "Three Beeps", "Siren"];
+              let label = state;
+              if (relay.id === 24) {
+                label = toneNames[state] || state;
+              } else if (state == 1) {
+                label = "Telegram";
+              } else {
+                label = "WhatsApp";
+              }
+              statusText.innerText = label;
               toggleButton.value = state;
             }
           }

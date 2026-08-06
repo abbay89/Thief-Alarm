@@ -162,6 +162,7 @@ unsigned long lastNotificationTime = 0;
 unsigned long notificationInterval = 180;  // seconds, pulled from Firebase path 17
 int movingMinRange = 0;   // cm, pulled from Firebase path 22
 int movingMaxRange = 600; // cm, pulled from Firebase path 23
+int buzzerTone = 1;       // selected alarm melody, pulled from Firebase path 24
 bool errorState = false;
 bool sensorState = false;
 bool useCustomWiFi = false;
@@ -261,6 +262,46 @@ bool sendNotification();
 void printValue(const byte& val) {
   Serial.print(' ');
   Serial.print(val);
+}
+
+// Play a familiar alarm melody on the digital buzzer.
+// tone: 0=off, 1=single beep, 2=continuous siren, 3=fast pulses,
+//       4=double beeps, 5=three short beeps, 6=police siren (slow-fast-slow)
+void playAlarmMelody(int tone) {
+  switch (tone) {
+    case 0: // silent
+      digitalWrite(BUZZER_PIN, LOW);
+      break;
+    case 1: // single beep
+      digitalWrite(BUZZER_PIN, HIGH); delay(500); digitalWrite(BUZZER_PIN, LOW);
+      break;
+    case 2: // continuous
+      digitalWrite(BUZZER_PIN, HIGH); delay(2500); digitalWrite(BUZZER_PIN, LOW);
+      break;
+    case 3: // fast pulses
+      for (int i = 0; i < 6; i++) {
+        digitalWrite(BUZZER_PIN, HIGH); delay(120); digitalWrite(BUZZER_PIN, LOW); delay(120);
+      }
+      break;
+    case 4: // double beeps
+      for (int i = 0; i < 2; i++) {
+        digitalWrite(BUZZER_PIN, HIGH); delay(220); digitalWrite(BUZZER_PIN, LOW); delay(180);
+      }
+      break;
+    case 5: // three short beeps
+      for (int i = 0; i < 3; i++) {
+        digitalWrite(BUZZER_PIN, HIGH); delay(160); digitalWrite(BUZZER_PIN, LOW); delay(140);
+      }
+      break;
+    case 6: // classic siren: slow long pulses (wailing)
+      for (int i = 0; i < 3; i++) {
+        digitalWrite(BUZZER_PIN, HIGH); delay(500); digitalWrite(BUZZER_PIN, LOW); delay(300);
+      }
+      break;
+    default: // single beep
+      digitalWrite(BUZZER_PIN, HIGH); delay(500); digitalWrite(BUZZER_PIN, LOW);
+      break;
+  }
 }
 
 void printData() {
@@ -435,11 +476,7 @@ void printData() {
           lastNotificationTime = now;
           notificationSent = true;
 
-          digitalWrite(BUZZER_PIN, HIGH);
-          if (!(sensor.movingTargetDetected() && sensor.stationaryTargetDetected())) {
-            delay(BUZZER_DURATION1);
-            digitalWrite(BUZZER_PIN, LOW);
-          }
+          playAlarmMelody(buzzerTone);
 
           Serial.print("NOTIF TRIGGERED! Distance: ");
           Serial.print(targetDistance);
@@ -635,6 +672,7 @@ void loop() {
         Database.get(aClient, "board1/outputs/digital/17", pollResultCallback, false, "dig_17");
         Database.get(aClient, "board1/outputs/digital/22", pollResultCallback, false, "dig_22");
         Database.get(aClient, "board1/outputs/digital/23", pollResultCallback, false, "dig_23");
+        Database.get(aClient, "board1/outputs/digital/24", pollResultCallback, false, "dig_24");
       }
 
       // Act on flags set by pollResultCallback (run outside the callback)
@@ -1052,6 +1090,12 @@ void pollResultCallback(AsyncResult &aResult) {
     Serial.printf("poll digital/23 movingMaxRange = %d cm\n", maxRange);
     if (maxRange > movingMinRange) {
       movingMaxRange = maxRange;
+    }
+  } else if (uid == "dig_24") {
+    int tone = RTDB.to<int>();
+    Serial.printf("poll digital/24 buzzerTone = %d\n", tone);
+    if (tone >= 0 && tone <= 6) {
+      buzzerTone = tone;
     }
   }
 }
