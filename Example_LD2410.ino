@@ -134,6 +134,8 @@ volatile bool pollUseCustomChanged = false;
 volatile bool pollCustomWiFiUpdated = false;
 bool lastPolledUseCustom = false;
 bool firstUseCustomPoll = true;
+bool firstCustomSsidPoll = true;
+bool firstCustomPassPoll = true;
 unsigned long lastPollTime = 0;
 
 // Polled values (set by pollResultCallback, consumed by processConnectRequest)
@@ -1081,13 +1083,25 @@ void pollResultCallback(AsyncResult &aResult) {
     }
   } else if (uid == "custom_ssid") {
     String v = RTDB.to<String>();
-    if (v.length() > 0) {
+    if (firstCustomSsidPoll) {
+      customWiFiSSID = v;
+      firstCustomSsidPoll = false;
+      Serial.printf("custom_ssid baseline = '%s' (no trigger)\n", v.c_str());
+      return;
+    }
+    if (v != customWiFiSSID) {
       customWiFiSSID = v;
       pollCustomWiFiUpdated = true;
     }
   } else if (uid == "custom_pass") {
     String v = RTDB.to<String>();
-    if (v.length() > 0) {
+    if (firstCustomPassPoll) {
+      customWiFiPass = v;
+      firstCustomPassPoll = false;
+      Serial.printf("custom_pass baseline (no trigger)\n");
+      return;
+    }
+    if (v != customWiFiPass) {
       customWiFiPass = v;
       pollCustomWiFiUpdated = true;
     }
