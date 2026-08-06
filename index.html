@@ -252,6 +252,12 @@
         <div class="pc-time">At <b id="bannerTime">--</b></div>
       </div>
 
+      <!-- Live presence indicator -->
+      <div class="presence-banner" id="presenceLiveBanner" style="justify-content:center; text-align:center;">
+        <div class="pc-label">Live Radar Presence</div>
+        <span class="banner-status none" id="presenceBadge" style="font-size:1.4rem;">Loading...</span>
+      </div>
+
       <!-- Moving vs Stationary -->
       <div class="presence-grid">
         <div class="presence-card moving">
@@ -406,6 +412,23 @@
 
     function startRelayControl() {
       const db = firebase.database();
+
+      // Live presence indicator (path 21 = boolean presenceDetected)
+      const presenceBadgeEl = document.getElementById("presenceBadge");
+      const presenceLiveBanner = document.getElementById("presenceLiveBanner");
+      db.ref("/board1/outputs/digital/21").on("value", snap => {
+        const detected = snap.val();
+        const badge = presenceBadgeEl;
+        if (detected) {
+          badge.innerText = "DETECTED";
+          badge.className = "banner-status moving";
+          presenceLiveBanner.style.borderColor = "rgba(249,115,22,0.6)";
+        } else {
+          badge.innerText = "NO PRESENCE";
+          badge.className = "banner-status none";
+          presenceLiveBanner.style.borderColor = "#334155";
+        }
+      });
 
       // Watch separate moving (19) and stationary (20) presence
       function watchPresence(id, timeElId) {
