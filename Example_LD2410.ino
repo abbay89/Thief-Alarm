@@ -133,6 +133,7 @@ volatile bool pollRestartRequest = false;
 volatile bool pollUseCustomChanged = false;
 volatile bool pollCustomWiFiUpdated = false;
 bool lastPolledUseCustom = false;
+bool firstUseCustomPoll = true;
 unsigned long lastPollTime = 0;
 
 // Polled values (set by pollResultCallback, consumed by processConnectRequest)
@@ -705,6 +706,11 @@ void loop() {
         Serial.println(">>> USE CUSTOM WIFI CHANGED <<<");
         connectToWiFi();
       }
+      if (pollCustomWiFiUpdated) {
+        pollCustomWiFiUpdated = false;
+        Serial.println(">>> CUSTOM WIFI PARAMS CHANGED, reconnecting <<<");
+        connectToWiFi();
+      }
       // if (Database.lastError().code() == 0) {
       // Serial.print("Data: ");
       // Serial.println(jsonStr);
@@ -1062,6 +1068,13 @@ void pollResultCallback(AsyncResult &aResult) {
     if (RTDB.to<bool>()) pollRestartRequest = true;
   } else if (uid == "use_custom") {
     bool useCustom = RTDB.to<bool>();
+    // First poll just records baseline; only react to real changes afterwards.
+    if (firstUseCustomPoll) {
+      lastPolledUseCustom = useCustom;
+      firstUseCustomPoll = false;
+      Serial.printf("use_custom baseline = %d (no trigger on first poll)\n", useCustom);
+      return;
+    }
     if (useCustom != lastPolledUseCustom) {
       lastPolledUseCustom = useCustom;
       if (useCustom) pollUseCustomChanged = true;
@@ -1265,6 +1278,32 @@ bool connectToWiFi() {
 
   String savedSSID = prefs.getString("ssid", "");
   String savedPass = prefs.getString("pass", "");
+
+  // Try custom WiFi from Firebase (if configured via Use Custom WiFi)
+  if (customWiFiSSID.length() > 0) {
+    Serial.printf("Trying custom Firebase SSID: %s\n", customWiFiSSID.c_str());
+    WiFi.disconnect(true);
+    delay(100);
+    WiFi.begin(customWiFiSSID.c_str(), customWiFiPass.c_str());
+
+    unsigned long startTime = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - startTime < 20000) {
+      delay(500);
+      Serial.print(".");
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("\n✅ Connected to custom Firebase SSID!");
+      Serial.print("IP: ");
+      Serial.println(WiFi.localIP());
+      Serial.print("SSID: ");
+      Serial.println(customWiFiSSID);
+      Serial.print("RSSI: ");
+      Serial.println(WiFi.RSSI());
+      return true;
+    }
+    Serial.println("\n❌ Custom SSID failed, trying saved/defaults...");
+  }
 
   // Try last saved (latest) SSID first
   if (savedSSID.length() > 0) {
