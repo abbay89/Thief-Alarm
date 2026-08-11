@@ -29,9 +29,16 @@
 */
 
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <HTTPClient.h>
 #include <time.h>
 #include <Preferences.h>
+
+// OTA + web log viewer
+#include <ArduinoOTA.h>
+#include <WebServer.h>
+#include <Update.h>
+#include <stdarg.h>
 
 #include <ArduinoJson.h>
 
@@ -39,14 +46,14 @@
 #include <FirebaseClient.h>
 #include "ExampleFunctions.h"  // Provides the functions used in the examples.
 
-#define Web_API_KEY "AIzaSyCwgPIXYmb1X265MAMnblvhuLH-F397HuY"
+#define Web_API_KEY "YOUR_FIREBASE_API_KEY"
 #define DATABASE_URL "https://thiefdetectorapp-default-rtdb.asia-southeast1.firebasedatabase.app"
-#define USER_EMAIL "abbay89@gmail.com"
-#define USER_PASS "Pangeran89"
+#define USER_EMAIL "YOUR_FIREBASE_EMAIL"
+#define USER_PASS "YOUR_FIREBASE_PASSWORD"
 
 // Default WiFi credentials (no DB needed)
-const char* DEFAULT_WIFI_SSID[] = {"Iconnet Baru_4G", "BlackPanther"};
-const char* DEFAULT_WIFI_PASS[] = {"30062019", "iniDiaPasswordnyaYah"};
+const char* DEFAULT_WIFI_SSID[] = {"YOUR_WIFI_SSID", "YOUR_WIFI_SSID_2"};
+const char* DEFAULT_WIFI_PASS[] = {"YOUR_WIFI_PASSWORD", "YOUR_WIFI_PASSWORD_2"};
 const int DEFAULT_WIFI_COUNT = 2;
 
 // Firebase paths
@@ -66,6 +73,7 @@ void startWiFiConfigPortal();
 void handleWiFiConfigChange(String path, RealtimeDatabaseResult &RTDB);
 void scanAndSendResults();
 void checkWiFiConnection();
+void lastOnlineWriteCallback(AsyncResult &aResult);
 
 // Authentication
 UserAuth user_auth(Web_API_KEY, USER_EMAIL, USER_PASS);
@@ -122,6 +130,21 @@ unsigned long ms = 0;
 const char* ntpServer = "pool.ntp.org";
 const long gmtOffset_sec = 7 * 3600;  // Example: GMT+7
 const int daylightOffset_sec = 0;     // Example: 1 hour daylight saving
+
+// Internet watchdog: if last_online hasn't been written successfully for
+// this long, the device has lost internet/Firebase connectivity -> restart.
+const unsigned long INTERNET_WATCHDOG_MS = 5UL * 60UL * 1000UL; // 5 minutes
+unsigned long lastOnlineOkMs = 0;
+bool lastOnlineOkInit = false;
+
+// Sensor malfunction watchdog: if no LD2410 data frame arrives for this long
+// while inside active hours, the sensor is considered broken -> buzzer beep.
+const unsigned long SENSOR_MALFUNCTION_MS = 30000UL; // 30s without data frame
+const unsigned long MALFUNCTION_BEEP_INTERVAL_MS = 60UL * 60UL * 1000UL; // every 1 hour
+unsigned long lastSensorDataMs = 0;
+unsigned long lastMalfunctionBeepMs = 0;
+
+
 // Database  path (where the data is)
 String listenerPath = "board1/outputs/digital/";
 String wifiConfigPath = "board1/wifi_config";
@@ -152,8 +175,8 @@ const char* serverUrl = "https://waservices.brahmayasa.com:8000/send-message";
 
 int notificationMethod = 1; // 0 = WhatsApp, 1 = Telegram
 
-const char* telegramBotToken = "8216163103:AAEZqACDFJKcgLqn4flSB7D6WNaTvFZFs7c";
-const char* telegramChatID = "-5502704120";
+const char* telegramBotToken = "YOUR_TELEGRAM_BOT_TOKEN";
+const char* telegramChatID = "YOUR_TELEGRAM_CHAT_ID";
 const char* telegramApiUrl = "https://api.telegram.org/bot";
 
 // Define retry parameters
@@ -262,6 +285,104 @@ MyLD2410 sensor(sensorSerial, true);
 MyLD2410 sensor(sensorSerial);
 #endif
 
+// ===================== OTA + WEB LOG =====================
+// Captures all Serial output into a ring buffer so it can be viewed
+// in a browser (http://<esp-ip>/ ) and allows firmware upload via:
+//   - Arduino IDE network port (ArduinoOTA)
+//   - browser web updater at /update
+#define WEBLOG_SIZE 16384
+static char weblogBuffer[WEBLOG_SIZE];
+static uint32_t weblogHead = 0;  // next write index
+static uint32_t weblogSize = 0;  // total bytes stored (capped at WEBLOG_SIZE)
+
+inline void weblogPush(uint8_t c) {
+  weblogBuffer[weblogHead] = c;
+  weblogHead = (weblogHead + 1) % WEBLOG_SIZE;
+  if (weblogSize < WEBLOG_SIZE) weblogSize++;
+}
+
+class WebLogStream : public Print {
+public:
+  void begin(unsigned long baud) { Serial.begin(baud); }
+  size_t write(uint8_t c) override {
+    weblogPush(c);
+    return Serial.write(c);
+  }
+  size_t write(const uint8_t *buffer, size_t size) override {
+    for (size_t i = 0; i < size; i++) weblogPush(buffer[i]);
+    return Serial.write(buffer, size);
+  }
+};
+
+WebLogStream webLogStream;
+#define Serial webLogStream
+
+WebServer otaServer(80);
+
+void handleRoot() {
+  otaServer.sendHeader("Cache-Control", "no-store");
+  otaServer.send(200, "text/html", (const char*)F(
+    "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+    "<title>Thief Alarm ESP32</title>"
+    "<style>body{font-family:Consolas,monospace;background:#111;color:#eee;margin:0;padding:16px}"
+    "h1,h2{color:#4fc3f7}pre{background:#000;border:1px solid #333;padding:10px;height:50vh;overflow:auto;white-space:pre-wrap;font-size:12px}"
+    "input,button{padding:8px;margin:4px}button{background:#4fc3f7;border:0;color:#000;font-weight:bold}"
+    "#ip{color:#ffd54f}</style></head><body>"
+    "<h1>Thief Alarm ESP32 - OTA &amp; Log</h1>"
+    "<p>IP: <span id=\"ip\"></span></p>"
+    "<h2>Serial Log</h2><pre id=\"log\">connecting...</pre>"
+    "<h2>OTA Update (.bin)</h2>"
+    "<form method=\"POST\" action=\"/update\" enctype=\"multipart/form-data\">"
+    "<input type=\"file\" name=\"firmware\"><input type=\"submit\" value=\"Upload &amp; Restart\"></form>"
+    "<script>"
+    "var ipEl=document.getElementById('ip');var logEl=document.getElementById('log');"
+    "fetch('/ip').then(function(r){return r.text();}).then(function(t){ipEl.textContent=t;});"
+    "function refresh(){var x=new XMLHttpRequest();x.open('GET','/log',true);x.onload=function(){"
+    "logEl.textContent=x.responseText;logEl.scrollTop=logEl.scrollHeight;};x.send();}"
+    "setInterval(refresh,2000);refresh();"
+    "</script></body></html>"));
+}
+
+void handleLog() {
+  otaServer.sendHeader("Cache-Control", "no-store");
+  String s;
+  uint32_t start = (weblogHead + WEBLOG_SIZE - weblogSize) % WEBLOG_SIZE;
+  s.reserve(weblogSize);
+  for (uint32_t i = 0; i < weblogSize; i++) {
+    s += weblogBuffer[(start + i) % WEBLOG_SIZE];
+  }
+  otaServer.send(200, "text/plain; charset=utf-8", s);
+}
+
+void handleIP() {
+  otaServer.sendHeader("Cache-Control", "no-store");
+  otaServer.send(200, "text/plain", WiFi.localIP().toString());
+}
+
+void handleUpdate() {
+  HTTPUpload &upload = otaServer.upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    Serial.printf("Update: %s\n", upload.filename.c_str());
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+      Update.printError(Serial);
+    }
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+      Update.printError(Serial);
+    }
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (Update.end(true)) {
+      Serial.println("OTA success, rebooting in 2s");
+      delay(2000);
+      ESP.restart();
+    } else {
+      Update.printError(Serial);
+    }
+  }
+}
+// =================== END OTA + WEB LOG ===================
+
 const unsigned long printEvery = 1000;  // print every second
 
 int getSecondTime(String timedb);
@@ -312,6 +433,34 @@ void playAlarmMelody(int tone) {
   }
 }
 
+// Malfunction alert: rapid "nit-nit-nit" pattern (3 very fast beeps).
+void playMalfunctionBeep() {
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(BUZZER_PIN, HIGH); delay(60); digitalWrite(BUZZER_PIN, LOW); delay(60);
+  }
+}
+
+// Returns true when the current local time is inside the active-hours window
+// (paths 13 start / 14 stop). Used by both printData() and the malfunction
+// watchdog in loop().
+bool isWithinWorkingHours() {
+  if (getLocalTime(&timeinfo)) {
+    nowhour = timeinfo.tm_hour;
+    nowminute = timeinfo.tm_min;
+  }
+  totalSecondNows = (nowhour * 3600UL) + (nowminute * 60UL);
+  totalStartSecondsInt = getSecondTime(startFromString2);
+  totalStopSecondsInt = getSecondTime(stopFromString2);
+  if (startFromString2.length() > 0 && stopFromString2.length() > 0) {
+    if (totalStartSecondsInt <= totalStopSecondsInt) {
+      return (totalSecondNows >= totalStartSecondsInt && totalSecondNows <= totalStopSecondsInt);
+    } else {
+      return (totalSecondNows >= totalStartSecondsInt || totalSecondNows <= totalStopSecondsInt);
+    }
+  }
+  return true;
+}
+
 void printData() {
 
   digitalWrite(FREE_PIN, HIGH);
@@ -319,8 +468,15 @@ void printData() {
   digitalWrite(MOVE_PIN, LOW);
   digitalWrite(BUZZER_PIN, LOW);
 
+  // A data frame arrived -> sensor is alive. Reset the malfunction timer.
+  lastSensorDataMs = millis();
+
+  // Compute active-hours window FIRST so the sensor can be disabled outside it.
+  bool withinWorkingHours = isWithinWorkingHours();
+
   // Push presenceDetected() status to Firebase so the dashboard can show it.
-  bool presenceNow = sensor.presenceDetected();
+  // Outside active hours the sensor is disabled: report "no presence".
+  bool presenceNow = withinWorkingHours && sensor.presenceDetected();
   if (app.ready() && (!presenceInit || presenceNow != lastPresenceStatus)) {
     lastPresenceStatus = presenceNow;
     presenceInit = true;
@@ -365,7 +521,7 @@ void printData() {
     strftime(dtBuf19, sizeof(dtBuf19), "%Y-%m-%d %H:%M:%S", &timeinfo);
     String dateTimeNow = String(dtBuf19);
     if (app.ready()) {
-      if(sensor.presenceDetected()){
+      if(sensor.presenceDetected() && withinWorkingHours){
         bool ok = Database.set<String>(aClient, "board1/outputs/digital/15", dateTimeNow + " MOVING " + String(sensor.movingTargetDistance()) + "cm");
         bool ok19 = Database.set<String>(aClient, "board1/outputs/digital/19", dateTimeNow + " " + String(sensor.movingTargetDistance()) + "cm");
 
@@ -403,7 +559,7 @@ void printData() {
 
     // Database.set<number_t>(aClient, "board1/outputs/digital/15", char*);
     if (app.ready()) {
-      if(sensor.presenceDetected()){
+      if(sensor.presenceDetected() && withinWorkingHours){
         bool ok = Database.set<String>(aClient, "board1/outputs/digital/15", dateTimeNow + " " + String(sensor.stationaryTargetDistance()) + "cm");
         bool ok20 = Database.set<String>(aClient, "board1/outputs/digital/20", dateTimeNow + " " + String(sensor.stationaryTargetDistance()) + "cm");
 
@@ -436,35 +592,19 @@ void printData() {
     Serial.println();
   }
 
-  nowhour = timeinfo.tm_hour;
-  nowminute = timeinfo.tm_min;
-  totalSecondNows = (nowhour * 3600UL) + (nowminute * 60UL);
-
-  // Serial.println(hour);
-  // Serial.println(minute);
-
-
-  // if (strcmp(TypeOf(startFrom), "char*") != 0 || strcmp(TypeOf(stopFrom), "char*") != 0 || strcmp(TypeOf(sensorState), "int") != 0 || startFrom == NULL || stopFrom == null ) {
-  // Database.get(streamClient, listenerPath, processData, true /* SSE mode (HTTP Streaming) */, "streamTask");
-  // }
-  // Serial.println("sensorstate44");
-  // Serial.println(sensorState);
-  // Serial.println("startFrom44");
-  // Serial.println(startFromString2);
-  bool withinWorkingHours = true;
-  totalStartSecondsInt = getSecondTime(startFromString2);
+  // (withinWorkingHours already computed at the top of printData() so the
+  //  sensor could be disabled before any presence writes happen.)
   Serial.println(totalStartSecondsInt);
-  totalStopSecondsInt = getSecondTime(stopFromString2);
   Serial.println(totalStopSecondsInt);
-  if (startFromString2.length() > 0 && stopFromString2.length() > 0) {
-    if (totalStartSecondsInt <= totalStopSecondsInt) {
-      withinWorkingHours = (totalSecondNows >= totalStartSecondsInt && totalSecondNows <= totalStopSecondsInt);
-    } else {
-      withinWorkingHours = (totalSecondNows >= totalStartSecondsInt || totalSecondNows <= totalStopSecondsInt);
-    }
-  }
 
-  if (sensor.movingTargetDetected() && sensor.stationaryTargetDetected()) {
+  if (!withinWorkingHours) {
+    // Outside active hours: sensor disabled, no buzzer, no notifications.
+    notificationSent = false;
+    digitalWrite(BUZZER_PIN, LOW);
+    digitalWrite(STATIC_PIN, LOW);
+    digitalWrite(MOVE_PIN, LOW);
+    targetDistance = 0;
+  }  if (sensor.movingTargetDetected() && sensor.stationaryTargetDetected()) {
     Serial.print("MODE DEBUG MOVING AND TARGET STATIC DETECTED.");
   }
 
@@ -475,7 +615,9 @@ void printData() {
     digitalWrite(BUZZER_PIN, LOW);
   }
 
-  if(sensor.presenceDetected()){
+  if (!withinWorkingHours) {
+    Serial.println("Sensor disabled (outside active hours)");
+  } else if (sensor.presenceDetected()) {
     if (sensor.movingTargetDetected() || sensor.stationaryTargetDetected()) {
       bool shouldTrigger = false;
       if (sensor.movingTargetDetected() && triggerMoving) {
@@ -568,6 +710,30 @@ void setup() {
   // Sync time BEFORE Firebase auth as well — TLS/JWT flows can be sensitive to system clock.
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
 
+  // Start OTA + web log server (after WiFi is connected)
+  ArduinoOTA.setHostname("thief-alarm-esp32");
+  ArduinoOTA.onStart([]() {
+    String type = (ArduinoOTA.getCommand() == U_FLASH) ? "sketch" : "filesystem";
+    Serial.printf("OTA start: %s\n", type.c_str());
+  });
+  ArduinoOTA.onEnd([]() {
+    Serial.println("OTA end, rebooting");
+  });
+  ArduinoOTA.onError([](ota_error_t err) {
+    Serial.printf("OTA error: %u\n", err);
+    ESP.restart();
+  });
+  ArduinoOTA.begin();
+  otaServer.on("/", handleRoot);
+  otaServer.on("/log", handleLog);
+  otaServer.on("/ip", handleIP);
+  otaServer.on("/update", HTTP_POST, []() {
+    otaServer.sendHeader("Location", "/");
+    otaServer.send(303);
+  }, handleUpdate);
+  otaServer.begin();
+  Serial.printf("OTA + web log ready: http://%s/\n", WiFi.localIP().toString().c_str());
+
   // Declare pins as outputs
   pinMode(output1, OUTPUT);
   pinMode(output2, OUTPUT);
@@ -628,6 +794,10 @@ void loop() {
   // Maintain authentication and async tasks
   app.loop();
 
+  // OTA + web log server
+  ArduinoOTA.handle();
+  otaServer.handleClient();
+
   // Check WiFi connection every 30 seconds
   static unsigned long lastWiFiCheck = 0;
   if (millis() - lastWiFiCheck > 30000) {
@@ -647,15 +817,23 @@ void loop() {
         Serial.println("WiFi deferred sync done");
       }
 
-      // Update last_online every 60 seconds
+      // Update last_online every 60 seconds (with success callback + watchdog)
       static unsigned long lastOnlineUpdate = 0;
       if (millis() - lastOnlineUpdate >= 60000) {
         lastOnlineUpdate = millis();
         if (getLocalTime(&timeinfo)) {
           char buf[30];
           strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &timeinfo);
-          Database.set<String>(aClient, "board1/wifi_config/last_online", String(buf));
+          Database.set<String>(aClient, "board1/wifi_config/last_online", String(buf), lastOnlineWriteCallback);
         }
+      }
+
+      // Internet watchdog: if no successful last_online write in a while,
+      // the device likely lost internet/Firebase access -> hard restart.
+      if (lastOnlineOkInit && millis() - lastOnlineOkMs >= INTERNET_WATCHDOG_MS) {
+        Serial.println("⚠️  No successful last_online write for watchdog period -> restarting");
+        delay(200);
+        ESP.restart();
       }
 
       //Do nothing - everything works with callback functions
@@ -758,8 +936,20 @@ void loop() {
     notificationSent = false;
   }
 
-
-  
+  // Sensor malfunction watchdog: while inside active hours, if no data frame
+  // has arrived for SENSOR_MALFUNCTION_MS, the LD2410 is presumed broken.
+  // Beep nit-nit-nit quickly once every hour until the sensor recovers.
+  if (sensorState && isWithinWorkingHours()) {
+    if (millis() - lastSensorDataMs >= SENSOR_MALFUNCTION_MS) {
+      if (millis() - lastMalfunctionBeepMs >= MALFUNCTION_BEEP_INTERVAL_MS) {
+        lastMalfunctionBeepMs = millis();
+        Serial.println("⚠️  SENSOR MALFUNCTION (no data frame) -> beeping");
+        playMalfunctionBeep();
+      }
+    } else {
+      lastMalfunctionBeepMs = 0;
+    }
+  }
 }
 
 bool sendTelegramNotification() {
@@ -919,7 +1109,7 @@ bool sendWhatsAppNotification() {
   http.begin(serverUrl);
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   http.setTimeout(20000);
-  String postData = "sender=6285883080713&number=HomeGroup&is_group_target=1&message=Human DETECTED (" + String(targetDistance) + "cm distance) at your Home!&token_auth=xGNOOvspX5ejzi6D";
+  String postData = "sender=YOUR_WA_SENDER&number=YOUR_WA_GROUP&is_group_target=1&message=Human DETECTED (" + String(targetDistance) + "cm distance) at your Home!&token_auth=YOUR_WA_TOKEN";
 
   int httpResponseCode = http.POST(postData);
 
@@ -1169,6 +1359,18 @@ void pollResultCallback(AsyncResult &aResult) {
     triggerStationary = RTDB.to<bool>();
     Serial.printf("poll digital/26 triggerStationary = %d\n", triggerStationary);
   }
+}
+
+// Callback for the last_online heartbeat write. Confirms internet/Firebase
+// connectivity so the watchdog never triggers while we are actually online.
+void lastOnlineWriteCallback(AsyncResult &aResult) {
+  if (aResult.isError()) {
+    Serial.printf("⚠️  last_online write FAILED: %s (code %d)\n",
+                  aResult.error().message().c_str(), aResult.error().code());
+    return;
+  }
+  lastOnlineOkMs = millis();
+  lastOnlineOkInit = true;
 }
 
 int getSecondTime(String timedb) {
