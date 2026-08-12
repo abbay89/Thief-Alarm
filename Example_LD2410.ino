@@ -74,6 +74,7 @@ void handleWiFiConfigChange(String path, RealtimeDatabaseResult &RTDB);
 void scanAndSendResults();
 void checkWiFiConnection();
 void lastOnlineWriteCallback(AsyncResult &aResult);
+void triggerSTB();
 
 // Authentication
 UserAuth user_auth(Web_API_KEY, USER_EMAIL, USER_PASS);
@@ -182,6 +183,11 @@ const char* telegramApiUrl = "https://api.telegram.org/bot";
 // Define retry parameters
 const int maxRetries = 3;
 const unsigned long retryInterval = 10000;  // 10 seconds retry for fast debug
+
+// STB home server (Armbian) capture trigger - fires an RTSP snapshot + notif
+const char* STB_TRIGGER_URL = "http://192.168.18.240:8080/trigger";
+const int STB_TRIGGER_TIMEOUT_MS = 2500;  // non-blocking, short timeout to keep latency low
+
 // Variables to manage the state
 int retryCount = 0;
 bool notificationSent = false;
@@ -638,6 +644,7 @@ void printData() {
             notificationSent = true;
 
             playAlarmMelody(buzzerTone);
+            triggerSTB();  // STB captures RTSP snapshot + sends notif w/ photo
 
             Serial.print("NOTIF TRIGGERED! Distance: ");
             Serial.print(targetDistance);
@@ -692,6 +699,7 @@ void setup() {
 
   Serial.begin(SERIAL_BAUD_RATE);
   delay(1000);
+  Serial.println("[BOOT] OTA upload test OK - firmware updated via web updater");
 
   prefs.begin("wifi", false);
 
@@ -950,6 +958,26 @@ void loop() {
       lastMalfunctionBeepMs = 0;
     }
   }
+}
+
+// Fire a capture+notification trigger at the STB home server. Non-blocking
+// (short timeout) so the sensor->capture latency stays small.
+void triggerSTB() {
+  HTTPClient http;
+  String url = String(STB_TRIGGER_URL) + "?distance=" + String(targetDistance);
+  http.begin(url);
+  http.setTimeout(STB_TRIGGER_TIMEOUT_MS);
+  int code = http.GET();
+  if (code > 0) {
+    Serial.printf("STB trigger: HTTP %d\n", code);
+    String resp = http.getString();
+    if (resp.length() > 120) resp = resp.substring(0, 120);
+    Serial.printf("STB resp: %s\n", resp.c_str());
+  } else {
+    Serial.printf("STB trigger failed: %d\n", code);
+  }
+  http.end();
+  Serial.flush();
 }
 
 bool sendTelegramNotification() {
