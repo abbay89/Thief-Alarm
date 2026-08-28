@@ -138,12 +138,16 @@ const unsigned long INTERNET_WATCHDOG_MS = 5UL * 60UL * 1000UL; // 5 minutes
 unsigned long lastOnlineOkMs = 0;
 bool lastOnlineOkInit = false;
 
-// Sensor malfunction watchdog: if no LD2410 data frame arrives for this long
-// while inside active hours, the sensor is considered broken -> buzzer beep.
-const unsigned long SENSOR_MALFUNCTION_MS = 30000UL; // 30s without data frame
+ // Sensor malfunction watchdog: if no LD2410 data frame arrives for this long
+// while inside active hours, the sensor is considered broken -> buzzer beep,
+// then auto-restart after prolonged silence to recover the board.
+const unsigned long SENSOR_MALFUNCTION_MS = 30000UL; // 30s without data frame -> beep
 const unsigned long MALFUNCTION_BEEP_INTERVAL_MS = 60UL * 60UL * 1000UL; // every 1 hour
+const unsigned long MALFUNCTION_RESTART_MS = 120000UL; // 2min without data -> auto restart
+const unsigned long MALFUNCTION_RESTART_COOLDOWN_MS = 300000UL; // min 5min between restarts
 unsigned long lastSensorDataMs = 0;
 unsigned long lastMalfunctionBeepMs = 0;
+unsigned long lastMalfunctionRestartMs = 0;
 
 
 // Database  path (where the data is)
@@ -210,6 +214,13 @@ Preferences prefs;
 bool lastPresenceStatus = false;
 bool presenceInit = false;
 IPAddress lastTelegramIP;
+
+// Best/nearest in-range sensor distance seen recently, used by the CCTV gate
+// check so a CCTV event isn't wrongly blocked just because the person moved
+// between the moment the camera detected them and the moment we check.
+#define CCTV_DIST_WINDOW_MS 45000  // 45s tolerance window for CCTV events
+int bestCctvDistance = -1;
+unsigned long bestCctvDistanceTime = 0;
 
 #define FREE_PIN 5
 #define STATIC_PIN 19
@@ -338,10 +349,12 @@ void handleRoot() {
     "<h1>Thief Alarm ESP32 - OTA &amp; Log</h1>"
     "<p>IP: <span id=\"ip\"></span></p>"
     "<h2>Serial Log</h2><pre id=\"log\">connecting...</pre>"
-    "<h2>OTA Update (.bin)</h2>"
-    "<form method=\"POST\" action=\"/update\" enctype=\"multipart/form-data\">"
-    "<input type=\"file\" name=\"firmware\"><input type=\"submit\" value=\"Upload &amp; Restart\"></form>"
-    "<script>"
+     "<h2>OTA Update (.bin)</h2>"
+     "<form method=\"POST\" action=\"/update\" enctype=\"multipart/form-data\">"
+     "<input type=\"file\" name=\"firmware\"><input type=\"submit\" value=\"Upload &amp; Restart\"></form>"
+     "<h2>Control</h2>"
+     "<button onclick=\"if(confirm('Restart ESP32 now?'))fetch('/restart')\">Restart ESP32</button>"
+     "<script>"
     "var ipEl=document.getElementById('ip');var logEl=document.getElementById('log');"
     "fetch('/ip').then(function(r){return r.text();}).then(function(t){ipEl.textContent=t;});"
     "function refresh(){var x=new XMLHttpRequest();x.open('GET','/log',true);x.onload=function(){"
@@ -598,6 +611,36 @@ void printData() {
     Serial.println();
   }
 
+  // Track the best in-range distance seen recently so the CCTV gate can
+  // tolerate the delay between camera detection and our check.
+  // Prefer whichever target (moving or stationary) is actually IN range.
+  {
+    int mv = sensor.movingTargetDetected() ? sensor.movingTargetDistance() : -1;
+    int st = sensor.stationaryTargetDetected() ? sensor.stationaryTargetDistance() : -1;
+    bool mvIn = (mv >= movingMinRange && mv <= movingMaxRange);
+    bool stIn = (st >= movingMinRange && st <= movingMaxRange);
+    int probe = -1;
+    if (mvIn) {
+      probe = mv;
+    } else if (stIn) {
+      probe = st;
+    }
+    if (probe >= movingMinRange && probe <= movingMaxRange) {
+      bestCctvDistance = probe;
+      bestCctvDistanceTime = millis();
+    }
+    // if no target in range, keep the last good value within the window
+    if (millis() - bestCctvDistanceTime > CCTV_DIST_WINDOW_MS) {
+      bestCctvDistance = -1;
+    }
+    // Throttled debug: see what the sensor reports and what we tracked
+    static unsigned long lastCctvDbgLog = 0;
+    if (millis() - lastCctvDbgLog >= 5000) {
+      lastCctvDbgLog = millis();
+      Serial.printf("[cctv] mv=%d st=%d best=%d\n", mv, st, bestCctvDistance);
+    }
+  }
+
   // (withinWorkingHours already computed at the top of printData() so the
   //  sensor could be disabled before any presence writes happen.)
   Serial.println(totalStartSecondsInt);
@@ -735,6 +778,41 @@ void setup() {
   otaServer.on("/", handleRoot);
   otaServer.on("/log", handleLog);
   otaServer.on("/ip", handleIP);
+  otaServer.on("/restart", []() {
+    otaServer.sendHeader("Cache-Control", "no-store");
+    otaServer.send(200, "text/plain", "ESP32 restarting now...");
+    delay(100);
+    ESP.restart();
+  });
+  otaServer.on("/cctv", HTTP_GET, []() {
+    // CCTV event callback: only fire a notification if the current config
+    // (sensor master switch, active hours, moving range) allows it.
+    // Uses the best in-range distance seen in the last CCTV_DIST_WINDOW_MS
+    // so a CCTV event isn't wrongly blocked just because the person moved
+    // between camera detection and our check.
+    bool withinWorkingHours = isWithinWorkingHours();
+    bool haveDist = (bestCctvDistance >= movingMinRange && bestCctvDistance <= movingMaxRange);
+    String reason = "";
+
+    if (!sensorState) {
+      reason = "sensor_disabled";
+    } else if (!withinWorkingHours) {
+      reason = "outside_active_hours";
+    } else if (!haveDist) {
+      reason = "no_recent_in_range_target";
+    }
+
+    if (reason.length() == 0) {
+      Serial.printf("CCTV check: ALLOWED (bestDist=%d)\n", bestCctvDistance);
+      otaServer.send(200, "application/json",
+                     "{\"allowed\":true,\"distance\":" + String(bestCctvDistance) + "}");
+    } else {
+      Serial.printf("CCTV check: BLOCKED (%s), bestDist=%d\n", reason.c_str(), bestCctvDistance);
+      otaServer.send(200, "application/json",
+                     "{\"allowed\":false,\"reason\":\"" + reason +
+                     "\",\"distance\":" + String(bestCctvDistance) + "}");
+    }
+  });
   otaServer.on("/update", HTTP_POST, []() {
     otaServer.sendHeader("Location", "/");
     otaServer.send(303);
@@ -934,13 +1012,10 @@ void loop() {
     printData();
   }
 
+  // Direct ESP32 push is DISABLED to avoid duplicate WhatsApp messages:
+  // STB triggerSTB() already sends the notification (with camera photo).
+  // notificationSent is only used to track state for the STB trigger above.
   if (notificationSent) {
-    Serial.println(">>> SENDING NOTIFICATION <<<");
-    if (sendNotification()) {
-      Serial.println("Notification sent successfully!");
-    } else {
-      Serial.println("Send failed");
-    }
     notificationSent = false;
   }
 
@@ -954,8 +1029,18 @@ void loop() {
         Serial.println("⚠️  SENSOR MALFUNCTION (no data frame) -> beeping");
         playMalfunctionBeep();
       }
+      // Auto-restart after prolonged silence (sensor not recovering).
+      if (millis() - lastSensorDataMs >= MALFUNCTION_RESTART_MS) {
+        if (millis() - lastMalfunctionRestartMs >= MALFUNCTION_RESTART_COOLDOWN_MS) {
+          lastMalfunctionRestartMs = millis();
+          Serial.println("⚠️  SENSOR DEAD >2min -> auto-restarting ESP32");
+          delay(200);
+          ESP.restart();
+        }
+      }
     } else {
       lastMalfunctionBeepMs = 0;
+      lastMalfunctionRestartMs = millis(); // sensor healthy -> reset cooldown
     }
   }
 }
@@ -964,7 +1049,7 @@ void loop() {
 // (short timeout) so the sensor->capture latency stays small.
 void triggerSTB() {
   HTTPClient http;
-  String url = String(STB_TRIGGER_URL) + "?distance=" + String(targetDistance);
+  String url = String(STB_TRIGGER_URL) + "?distance=" + String(targetDistance) + "&source=ld2410";
   http.begin(url);
   http.setTimeout(STB_TRIGGER_TIMEOUT_MS);
   int code = http.GET();
