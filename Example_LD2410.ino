@@ -595,8 +595,9 @@ void printData() {
   bool alarmActiveNow = withinWorkingHours || doorArmedActive;
 
   // Push presenceDetected() status to Firebase so the dashboard can show it.
-  // Outside active hours the sensor is disabled: report "no presence".
-  bool presenceNow = withinWorkingHours && sensor.presenceDetected();
+  // When the smart-door armed mode is active the sensor runs 24h, same as
+  // inside active hours.
+  bool presenceNow = alarmActiveNow && sensor.presenceDetected();
   if (app.ready() && (!presenceInit || presenceNow != lastPresenceStatus)) {
     lastPresenceStatus = presenceNow;
     presenceInit = true;
@@ -641,7 +642,7 @@ void printData() {
     strftime(dtBuf19, sizeof(dtBuf19), "%Y-%m-%d %H:%M:%S", &timeinfo);
     String dateTimeNow = String(dtBuf19);
     if (app.ready()) {
-      if(sensor.presenceDetected() && withinWorkingHours){
+      if(sensor.presenceDetected() && alarmActiveNow){
         bool ok = Database.set<String>(aClient, "board1/outputs/digital/15", dateTimeNow + " MOVING " + String(sensor.movingTargetDistance()) + "cm");
         bool ok19 = Database.set<String>(aClient, "board1/outputs/digital/19", dateTimeNow + " " + String(sensor.movingTargetDistance()) + "cm");
 
@@ -679,7 +680,7 @@ void printData() {
 
     // Database.set<number_t>(aClient, "board1/outputs/digital/15", char*);
     if (app.ready()) {
-      if(sensor.presenceDetected() && withinWorkingHours){
+      if(sensor.presenceDetected() && alarmActiveNow){
         bool ok = Database.set<String>(aClient, "board1/outputs/digital/15", dateTimeNow + " " + String(sensor.stationaryTargetDistance()) + "cm");
         bool ok20 = Database.set<String>(aClient, "board1/outputs/digital/20", dateTimeNow + " " + String(sensor.stationaryTargetDistance()) + "cm");
 
