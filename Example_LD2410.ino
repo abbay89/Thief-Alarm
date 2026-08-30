@@ -75,6 +75,7 @@ void scanAndSendResults();
 void checkWiFiConnection();
 void lastOnlineWriteCallback(AsyncResult &aResult);
 void triggerSTB();
+bool sendWhatsAppText(const String& message);
 
 // Authentication
 UserAuth user_auth(Web_API_KEY, USER_EMAIL, USER_PASS);
@@ -205,6 +206,9 @@ bool triggerMoving = true;   // moving target triggers notif/buzzer, path 25
 bool triggerStationary = false; // stationary target triggers notif/buzzer, path 26
 bool errorState = false;
 bool sensorState = true;
+// Active-hours monitoring-state tracking for the WhatsApp ON/OFF notice.
+bool lastActiveHoursState = false;
+bool activeHoursInit = false;
 bool useCustomWiFi = false;
 String customWiFiSSID = "";
 String customWiFiPass = "";
@@ -1043,6 +1047,52 @@ void loop() {
       lastMalfunctionRestartMs = millis(); // sensor healthy -> reset cooldown
     }
   }
+
+  // WhatsApp notice when the active-hours monitoring state flips ON/OFF
+  // (path 13 start / path 14 stop). Only sent if the LD2410 is healthy
+  // (recent data frame) so we never claim monitoring is armed while the
+  // sensor is hung. First pass only records a baseline so boot doesn't spam.
+  // The tracker is armed 60s after boot so the NTP clock has settled (the
+  // RTC survives soft-resets with the pre-boot time, which would otherwise
+  // cause a spurious flip when NTP corrects it).
+  static unsigned long lastHoursCheckMs = 0;
+  static unsigned long hoursBootMs = millis();
+  if (millis() - hoursBootMs >= 60000 && millis() - lastHoursCheckMs >= 1000) {
+    lastHoursCheckMs = millis();
+    if (getLocalTime(&timeinfo)) {
+      totalSecondNows = (nowhour * 3600UL) + (nowminute * 60UL);
+      totalStartSecondsInt = getSecondTime(startFromString2);
+      totalStopSecondsInt = getSecondTime(stopFromString2);
+      bool nowWithin = false;
+      if (startFromString2.length() > 0 && stopFromString2.length() > 0) {
+        if (totalStartSecondsInt <= totalStopSecondsInt) {
+          nowWithin = (totalSecondNows >= totalStartSecondsInt && totalSecondNows <= totalStopSecondsInt);
+        } else {
+          nowWithin = (totalSecondNows >= totalStartSecondsInt || totalSecondNows <= totalStopSecondsInt);
+        }
+      } else {
+        nowWithin = true;
+      }
+
+      if (!activeHoursInit) {
+        activeHoursInit = true;
+        lastActiveHoursState = nowWithin;
+        Serial.printf("active-hours baseline = %d (no WA notice at boot)\n", nowWithin);
+      } else if (nowWithin != lastActiveHoursState) {
+        lastActiveHoursState = nowWithin;
+        bool sensorHealthy = (millis() - lastSensorDataMs < SENSOR_MALFUNCTION_MS);
+        if (sensorHealthy) {
+          String msg = nowWithin
+            ? "Notifikasi monitoring AKTIF (jam aktif mulai " + startFromString2 + ")"
+            : "Notifikasi monitoring NONAKTIF (jam aktif berakhir " + stopFromString2 + ")";
+          Serial.println(nowWithin ? ">>> active-hours ON -> sending WA 'AKTIF'" : ">>> active-hours OFF -> sending WA 'NONAKTIF'");
+          sendWhatsAppText(msg);
+        } else {
+          Serial.println(">>> active-hours state flipped but sensor UNHEALTHY -> WA notice skipped");
+        }
+      }
+    }
+  }
 }
 
 // Fire a capture+notification trigger at the STB home server. Non-blocking
@@ -1235,6 +1285,32 @@ bool sendWhatsAppNotification() {
     return true;
   } else {
     Serial.printf("WA Error code: %d\n", httpResponseCode);
+    http.end();
+    return false;
+  }
+}
+
+// Reusable WhatsApp TEXT send (no camera photo) — used for the active-hours
+// monitoring ON/OFF notices. Message must be assembled by the caller.
+bool sendWhatsAppText(const String& message) {
+  HTTPClient http;
+  http.begin(serverUrl);
+  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+  http.setTimeout(20000);
+  String postData = "sender=YOUR_WA_SENDER&number=YOUR_WA_GROUP&is_group_target=1&message=" + message + "&token_auth=YOUR_WA_TOKEN";
+
+  int httpResponseCode = http.POST(postData);
+
+  if (httpResponseCode > 0) {
+    Serial.printf("WA text HTTP Response code: %d\n", httpResponseCode);
+    String response = http.getString();
+    if (response.length() > 200) response = response.substring(0, 200);
+    Serial.println(response);
+    http.end();
+    Serial.println("✅ WHATSAPP TEXT NOTIFICATION SENT!");
+    return true;
+  } else {
+    Serial.printf("WA text Error code: %d\n", httpResponseCode);
     http.end();
     return false;
   }
