@@ -76,6 +76,7 @@ void checkWiFiConnection();
 void lastOnlineWriteCallback(AsyncResult &aResult);
 void triggerSTB();
 bool sendWhatsAppText(const String& message);
+void handleDoorLockPost(const String& body);
 
 // Authentication
 UserAuth user_auth(Web_API_KEY, USER_EMAIL, USER_PASS);
@@ -150,6 +151,15 @@ unsigned long lastSensorDataMs = 0;
 unsigned long lastMalfunctionBeepMs = 0;
 unsigned long lastMalfunctionRestartMs = 0;
 
+// Smart-door armed mode: door_locked -> ARM (away), door_unlocked -> DISARM.
+// While armed, the alarm is ACTIVE 24h regardless of active hours, so the
+// property is protected all day when the owner is away. A short grace period
+// (exit delay) after arming suppresses notifications so the owner walking out
+// doesn't set off a false alarm.
+#define SMARTDOOR_ARM_GRACE_MS 45000UL
+bool smartdoorArmed = false;
+unsigned long smartdoorArmedAtMs = 0;
+
 
 // Database  path (where the data is)
 String listenerPath = "board1/outputs/digital/";
@@ -181,8 +191,8 @@ const char* serverUrl = "https://waservices.brahmayasa.com:8000/send-message";
 
 int notificationMethod = 1; // 0 = WhatsApp, 1 = Telegram
 
-const char* telegramBotToken = "YOUR_TELEGRAM_BOT_TOKEN";
-const char* telegramChatID = "YOUR_TELEGRAM_CHAT_ID";
+const char* telegramBotToken = "8216163103:AAEZqACDFJKcgLqn4flSB7D6WNaTvFZFs7c";
+const char* telegramChatID = "-5502704120";
 const char* telegramApiUrl = "https://api.telegram.org/bot";
 
 // Define retry parameters
@@ -484,6 +494,88 @@ bool isWithinWorkingHours() {
   return true;
 }
 
+void handleDoorLockPost(const String& body) {
+  // Wishome door-lock event forwarded from the STB (wishome MQTT bridge).
+  // door_locked (logType 0) -> ARM (owner left home, protect 24h).
+  // door_unlocked (logType 1) -> DISARM (owner returned).
+  // Events land in the dedicated smartdoor/ Firebase root so the dashboard has
+  // full history without touching the existing board1 trigger data.
+  //
+  // NOTE: this FirebaseClient library writes String values without JSON
+  // escaping, so every stored string is sanitised to printable ASCII chars
+  // only (numeric values go out unquoted via set<int32_t>/set<int64_t>).
+  if (body.length() == 0 || body.length() > 1024) {
+    Serial.printf("DoorLock: ignored empty/oversized body (%d bytes)\n", body.length());
+    return;
+  }
+  StaticJsonDocument<768> doc;
+  if (deserializeJson(doc, body)) {
+    Serial.printf("DoorLock: JSON parse failed: %.80s\n", body.c_str());
+    return;
+  }
+  String ev = doc["event"] | "";
+  int32_t logType = doc["logType"] | -1;
+  int32_t logInfoType = doc["logInfoType"] | 0;
+  int32_t keyType = doc["keyType"] | 0;
+  String keyName = doc["keyName"] | "";
+  String deviceName = doc["deviceName"] | "";
+  String logId = doc["logId"] | "";
+  int64_t createTime = doc["createTime"] | 0LL;
+
+  auto sanitize = [](String s) -> String {
+    String r;
+    r.reserve(s.length());
+    for (unsigned i = 0; i < s.length(); i++) {
+      char c = s.charAt(i);
+      if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+          (c >= '0' && c <= '9') || c == ' ' || c == '-' || c == '_' ||
+          c == '.' || c == '@' || c == ':' || c == '(' || c == ')')
+        r += c;
+    }
+    while (r.length() > 0 && r.charAt(r.length() - 1) == ' ') r.remove(r.length() - 1);
+    return r;
+  };
+
+  bool newArmed = smartdoorArmed;
+  if (ev == "door_locked" || logType == 0) {
+    newArmed = true;
+  } else if (ev == "door_unlocked" || logType == 1) {
+    newArmed = false;
+  }
+
+  if (newArmed != smartdoorArmed) {
+    smartdoorArmed = newArmed;
+    smartdoorArmedAtMs = millis();
+    Serial.printf("DoorLock: [%s key=%s] -> SMARTDOOR %s (grace %lus)\n",
+                  ev.isEmpty() ? ("type " + String((int)logType)).c_str() : ev.c_str(),
+                  sanitize(keyName).isEmpty() ? "-" : sanitize(keyName).c_str(),
+                  smartdoorArmed ? "ARMED" : "disarmed",
+                  SMARTDOOR_ARM_GRACE_MS / 1000);
+  }
+
+  if (app.ready()) {
+    Database.set<bool>(aClient, "smartdoor/armed", smartdoorArmed);
+    String key = logId;
+    if (key.length() == 0 || key.length() > 32) {
+      key = "ev_" + String((unsigned long)createTime);
+    }
+    String base = "smartdoor/events/" + key + "/";
+    if (ev.length() > 0) Database.set<String>(aClient, base + "event", sanitize(ev));
+    Database.set<int32_t>(aClient, base + "logType", logType);
+    Database.set<int32_t>(aClient, base + "logInfoType", logInfoType);
+    Database.set<int32_t>(aClient, base + "keyType", keyType);
+    Database.set<String>(aClient, base + "keyName", sanitize(keyName));
+    Database.set<String>(aClient, base + "deviceName", sanitize(deviceName));
+    Database.set<int64_t>(aClient, base + "createTime", createTime);
+    String summary = "event=" + sanitize(ev) + " type=" + String((long)logType) +
+                     (sanitize(keyName).length() > 0 ? " name=" + sanitize(keyName) : "");
+    Database.set<String>(aClient, "smartdoor/last_event", summary);
+    Serial.println("DoorLock: smartdoor/ Firebase updated");
+  } else {
+    Serial.println("DoorLock: Firebase not ready, smartdoor/ update skipped");
+  }
+}
+
 void printData() {
 
   digitalWrite(FREE_PIN, HIGH);
@@ -496,6 +588,11 @@ void printData() {
 
   // Compute active-hours window FIRST so the sensor can be disabled outside it.
   bool withinWorkingHours = isWithinWorkingHours();
+  // Smart-door armed-away mode overrides the active-hours clock (protects the
+  // property 24h while the owner is gone), after a short exit-delay grace.
+  bool doorArmedActive = smartdoorArmed &&
+      (millis() - smartdoorArmedAtMs >= SMARTDOOR_ARM_GRACE_MS);
+  bool alarmActiveNow = withinWorkingHours || doorArmedActive;
 
   // Push presenceDetected() status to Firebase so the dashboard can show it.
   // Outside active hours the sensor is disabled: report "no presence".
@@ -650,8 +747,9 @@ void printData() {
   Serial.println(totalStartSecondsInt);
   Serial.println(totalStopSecondsInt);
 
-  if (!withinWorkingHours) {
-    // Outside active hours: sensor disabled, no buzzer, no notifications.
+  if (!alarmActiveNow) {
+    // Outside active hours & not smart-door-armed: sensor disabled, no buzzer,
+    // no notifications.
     notificationSent = false;
     digitalWrite(BUZZER_PIN, LOW);
     digitalWrite(STATIC_PIN, LOW);
@@ -668,8 +766,8 @@ void printData() {
     digitalWrite(BUZZER_PIN, LOW);
   }
 
-  if (!withinWorkingHours) {
-    Serial.println("Sensor disabled (outside active hours)");
+  if (!alarmActiveNow) {
+    Serial.println("Sensor disabled (outside active hours, not armed)");
   } else if (sensor.presenceDetected()) {
     if (sensor.movingTargetDetected() || sensor.stationaryTargetDetected()) {
       bool shouldTrigger = false;
@@ -684,7 +782,7 @@ void printData() {
       if (shouldTrigger) {
         bool withinMovingRange = (targetDistance >= movingMinRange && targetDistance <= movingMaxRange);
 
-        if (sensorState && withinWorkingHours && withinMovingRange) {
+        if (sensorState && alarmActiveNow && withinMovingRange) {
           unsigned long now = millis();
           if (now - lastNotificationTime >= notificationInterval * 1000UL || lastNotificationTime == 0) {
             lastNotificationTime = now;
@@ -788,6 +886,10 @@ void setup() {
     delay(100);
     ESP.restart();
   });
+  otaServer.on("/doorlock", HTTP_POST, []() {
+    handleDoorLockPost(otaServer.arg("plain"));
+    otaServer.send(200, "text/plain", "ok");
+  });
   otaServer.on("/cctv", HTTP_GET, []() {
     // CCTV event callback: only fire a notification if the current config
     // (sensor master switch, active hours, moving range) allows it.
@@ -795,12 +897,15 @@ void setup() {
     // so a CCTV event isn't wrongly blocked just because the person moved
     // between camera detection and our check.
     bool withinWorkingHours = isWithinWorkingHours();
+    bool doorArmedActive = smartdoorArmed &&
+        (millis() - smartdoorArmedAtMs >= SMARTDOOR_ARM_GRACE_MS);
+    bool withinActive = withinWorkingHours || doorArmedActive;
     bool haveDist = (bestCctvDistance >= movingMinRange && bestCctvDistance <= movingMaxRange);
     String reason = "";
 
     if (!sensorState) {
       reason = "sensor_disabled";
-    } else if (!withinWorkingHours) {
+    } else if (!withinActive) {
       reason = "outside_active_hours";
     } else if (!haveDist) {
       reason = "no_recent_in_range_target";
@@ -970,6 +1075,7 @@ void loop() {
         Database.get(aClient, "board1/outputs/digital/24", pollResultCallback, false, "dig_24");
         Database.get(aClient, "board1/outputs/digital/25", pollResultCallback, false, "dig_25");
         Database.get(aClient, "board1/outputs/digital/26", pollResultCallback, false, "dig_26");
+        Database.get(aClient, "smartdoor/armed", pollResultCallback, false, "door_armed");
       }
 
       // Act on flags set by pollResultCallback (run outside the callback)
@@ -1026,7 +1132,7 @@ void loop() {
   // Sensor malfunction watchdog: while inside active hours, if no data frame
   // has arrived for SENSOR_MALFUNCTION_MS, the LD2410 is presumed broken.
   // Beep nit-nit-nit quickly once every hour until the sensor recovers.
-  if (sensorState && isWithinWorkingHours()) {
+  if (sensorState && (isWithinWorkingHours() || smartdoorArmed)) {
     if (millis() - lastSensorDataMs >= SENSOR_MALFUNCTION_MS) {
       if (millis() - lastMalfunctionBeepMs >= MALFUNCTION_BEEP_INTERVAL_MS) {
         lastMalfunctionBeepMs = millis();
@@ -1507,6 +1613,14 @@ void pollResultCallback(AsyncResult &aResult) {
   } else if (uid == "dig_12") {
     sensorState = RTDB.to<bool>();
     Serial.printf("poll digital/12 sensorState = %d\n", sensorState);
+  } else if (uid == "door_armed") {
+    bool v = RTDB.to<bool>();
+    if (v != smartdoorArmed) {
+      smartdoorArmed = v;
+      smartdoorArmedAtMs = millis();
+      Serial.printf("poll smartdoor/armed = %d%s\n", smartdoorArmed,
+                    smartdoorArmed ? " (ARMED-away)" : "");
+    }
   } else if (uid == "dig_13") {
     startFromString2 = RTDB.to<String>();
     Serial.printf("poll digital/13 start = %s\n", startFromString2.c_str());
