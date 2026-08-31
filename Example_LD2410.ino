@@ -46,14 +46,14 @@
 #include <FirebaseClient.h>
 #include "ExampleFunctions.h"  // Provides the functions used in the examples.
 
-#define Web_API_KEY "YOUR_FIREBASE_API_KEY"
+#define Web_API_KEY "AIzaSyCwgPIXYmb1X265MAMnblvhuLH-F397HuY"
 #define DATABASE_URL "https://thiefdetectorapp-default-rtdb.asia-southeast1.firebasedatabase.app"
-#define USER_EMAIL "YOUR_FIREBASE_EMAIL"
-#define USER_PASS "YOUR_FIREBASE_PASSWORD"
+#define USER_EMAIL "abbay89@gmail.com"
+#define USER_PASS "Pangeran89"
 
 // Default WiFi credentials (no DB needed)
-const char* DEFAULT_WIFI_SSID[] = {"YOUR_WIFI_SSID", "YOUR_WIFI_SSID_2"};
-const char* DEFAULT_WIFI_PASS[] = {"YOUR_WIFI_PASSWORD", "YOUR_WIFI_PASSWORD_2"};
+const char* DEFAULT_WIFI_SSID[] = {"Iconnet Baru_4G", "BlackPanther"};
+const char* DEFAULT_WIFI_PASS[] = {"30062019", "iniDiaPasswordnyaYah"};
 const int DEFAULT_WIFI_COUNT = 2;
 
 // Firebase paths
@@ -1379,7 +1379,7 @@ bool sendWhatsAppNotification() {
   http.begin(serverUrl);
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   http.setTimeout(20000);
-  String postData = "sender=YOUR_WA_SENDER&number=YOUR_WA_GROUP&is_group_target=1&message=Human DETECTED (" + String(targetDistance) + "cm distance) at your Home!&token_auth=YOUR_WA_TOKEN";
+  String postData = "sender=6285883080713&number=HomeGroup&is_group_target=1&message=Human DETECTED (" + String(targetDistance) + "cm distance) at your Home!&token_auth=xGNOOvspX5ejzi6D";
 
   int httpResponseCode = http.POST(postData);
 
@@ -1404,7 +1404,7 @@ bool sendWhatsAppText(const String& message) {
   http.begin(serverUrl);
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   http.setTimeout(20000);
-  String postData = "sender=YOUR_WA_SENDER&number=YOUR_WA_GROUP&is_group_target=1&message=" + message + "&token_auth=YOUR_WA_TOKEN";
+  String postData = "sender=6285883080713&number=HomeGroup&is_group_target=1&message=" + message + "&token_auth=xGNOOvspX5ejzi6D";
 
   int httpResponseCode = http.POST(postData);
 
