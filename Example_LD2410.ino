@@ -1131,10 +1131,12 @@ void loop() {
     notificationSent = false;
   }
 
-  // Sensor malfunction watchdog: while inside active hours, if no data frame
-  // has arrived for SENSOR_MALFUNCTION_MS, the LD2410 is presumed broken.
-  // Beep nit-nit-nit quickly once every hour until the sensor recovers.
-  if (sensorOk && sensorState && (isWithinWorkingHours() || smartdoorArmed)) {
+  // Sensor malfunction watchdog: whenever the sensor master switch is ON, if
+  // no data frame has arrived for SENSOR_MALFUNCTION_MS, the LD2410 is presumed
+  // broken (independent of active hours). Beep nit-nit-nit quickly once every
+  // hour until the sensor recovers, then auto-restart the ESP32 after
+  // MALFUNCTION_RESTART_MS of silence (min cooldown between restarts).
+  if (sensorOk && sensorState) {
     if (millis() - lastSensorDataMs >= SENSOR_MALFUNCTION_MS) {
       if (millis() - lastMalfunctionBeepMs >= MALFUNCTION_BEEP_INTERVAL_MS) {
         lastMalfunctionBeepMs = millis();
