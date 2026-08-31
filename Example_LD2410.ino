@@ -216,6 +216,7 @@ bool triggerMoving = true;   // moving target triggers notif/buzzer, path 25
 bool triggerStationary = false; // stationary target triggers notif/buzzer, path 26
 bool errorState = false;
 bool sensorState = true;
+bool sensorOk = true;
 // Active-hours monitoring-state tracking for the WhatsApp ON/OFF notice.
 bool lastActiveHoursState = false;
 bool activeHoursInit = false;
@@ -972,15 +973,15 @@ void setup() {
   delay(2000);
   Serial.println(__FILE__);
   if (!sensor.begin()) {
-    Serial.println("Failed to communicate with the sensor.");
-    while (true) {}
-  }
-
+    Serial.println("Failed to communicate with the sensor. Degraded mode: OTA/web log still live, watchdog off.");
+    sensorOk = false;
+  } else {
 #ifdef ENHANCED_MODE
-  sensor.enhancedMode();
+    sensor.enhancedMode();
 #else
-  sensor.enhancedMode(false);
+    sensor.enhancedMode(false);
 #endif
+  }
 
   delay(printEvery);
 }
@@ -1118,7 +1119,7 @@ void loop() {
   }
 
   static unsigned long nextPrint = 0;
-  if ((sensor.check() == MyLD2410::Response::DATA) && (millis() >= nextPrint)) {
+  if (sensorOk && (sensor.check() == MyLD2410::Response::DATA) && (millis() >= nextPrint)) {
     nextPrint = millis() + printEvery;
     printData();
   }
@@ -1133,7 +1134,7 @@ void loop() {
   // Sensor malfunction watchdog: while inside active hours, if no data frame
   // has arrived for SENSOR_MALFUNCTION_MS, the LD2410 is presumed broken.
   // Beep nit-nit-nit quickly once every hour until the sensor recovers.
-  if (sensorState && (isWithinWorkingHours() || smartdoorArmed)) {
+  if (sensorOk && sensorState && (isWithinWorkingHours() || smartdoorArmed)) {
     if (millis() - lastSensorDataMs >= SENSOR_MALFUNCTION_MS) {
       if (millis() - lastMalfunctionBeepMs >= MALFUNCTION_BEEP_INTERVAL_MS) {
         lastMalfunctionBeepMs = millis();
